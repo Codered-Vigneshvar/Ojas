@@ -1,6 +1,6 @@
-# Ojas — Clinical Patient Workspace Starter Kit
+# Ojas — Clinical Patient Management Workspace Starter Kit
 
-> A full-stack, patient workspace for doctors — built as an extensible foundation for adding AI/agentic capabilities.
+> A full-stack, patient management workspace for doctors — built as an extensible foundation for adding AI/agentic capabilities.
 
 **Ojas** (Sanskrit: ओजस् — "vitality, life force") Ojas is an AI-powered patient management system built to make clinic software simpler, faster, and easier to use.
 
