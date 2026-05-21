@@ -1,0 +1,2 @@
+from ojas.repositories.artifact_repository import ArtifactRepository as ArtifactRepository
+from ojas.repositories.patient_repository import PatientRepository as PatientRepository
