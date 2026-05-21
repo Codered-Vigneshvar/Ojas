@@ -2,7 +2,30 @@
 
 > A full-stack, production-quality patient workspace for doctors — built as an extensible foundation for adding AI/agentic capabilities.
 
-**Ojas** (Sanskrit: ओजस् — "vitality, life force") gives clinicians a workspace to manage patients, upload documents, record consultations, and write clinical notes. The codebase is structured specifically as a **starter kit** for developers who want to build AI-powered clinical tools on top of a working foundation.
+**Ojas** (Sanskrit: ओजस् — "vitality, life force") Ojas is an AI-powered patient management system built to make clinic software simpler, faster, and easier to use.
+
+Most patient management platforms require doctors or clinic staff to move through multiple screens, forms, and buttons just to complete basic tasks like creating a patient profile, updating visit notes, checking history, or adding prescriptions. This often makes clinics dependent on trained assistants or admin staff.
+
+Ojas changes this by using a simple, natural-language-first interface.
+
+Instead of filling every field manually, a doctor or staff member can select a patient and type or speak information in plain language. This could include symptoms, diagnosis, treatment details, prescriptions, follow-up notes, or general observations. Ojas then understands the input, organizes it, and stores it in the correct patient record.
+
+## Core Idea
+
+Ojas works like an intelligent clinic assistant that helps users:
+
+- Create and search patients using phone numbers
+- Capture consultation notes easily
+- Organize patient history, visits, prescriptions, and follow-ups
+- Reduce repetitive clicks and manual work
+- Retrieve patient information through natural language
+- Lower the learning curve for clinic staff
+
+## Vision
+
+The goal of Ojas is to create a zero-friction patient management experience where doctors can focus more on care and less on software.
+
+
 
 ---
 
