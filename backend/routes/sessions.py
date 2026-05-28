@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import uuid
 from typing import Any
 
@@ -8,17 +10,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 from models import ConsultationSession
+from services.auth import UserInfo, get_current_user
 
 router = APIRouter(tags=["sessions"])
 
 
 class CreateSessionBody(BaseModel):
     patient_id: uuid.UUID
-    clinic_id: uuid.UUID
 
 
 class PatchSessionBody(BaseModel):
     raw_transcript: str | None = None
+    doctor_notes: str | None = None
     structured_note: dict[str, Any] | None = None
     tags: list[str] | None = None
     prescription_summary: dict[str, Any] | None = None
@@ -30,6 +33,7 @@ def _serialize(s: ConsultationSession) -> dict:
         "patient_id": str(s.patient_id),
         "clinic_id": str(s.clinic_id),
         "raw_transcript": s.raw_transcript,
+        "doctor_notes": s.doctor_notes,
         "structured_note": s.structured_note,
         "tags": s.tags,
         "prescription_storage_key": s.prescription_storage_key,
@@ -41,9 +45,14 @@ def _serialize(s: ConsultationSession) -> dict:
 
 @router.post("/session/create", status_code=201)
 async def create_session(
-    body: CreateSessionBody, db: AsyncSession = Depends(get_db)
+    body: CreateSessionBody,
+    db: AsyncSession = Depends(get_db),
+    current_user: UserInfo = Depends(get_current_user),
 ) -> dict:
-    session = ConsultationSession(patient_id=body.patient_id, clinic_id=body.clinic_id)
+    session = ConsultationSession(
+        patient_id=body.patient_id,
+        clinic_id=current_user.clinic_id,
+    )
     db.add(session)
     await db.commit()
     await db.refresh(session)
@@ -51,9 +60,16 @@ async def create_session(
 
 
 @router.get("/session/{session_id}")
-async def get_session(session_id: uuid.UUID, db: AsyncSession = Depends(get_db)) -> dict:
+async def get_session(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: UserInfo = Depends(get_current_user),
+) -> dict:
     result = await db.execute(
-        select(ConsultationSession).where(ConsultationSession.id == session_id)
+        select(ConsultationSession).where(
+            ConsultationSession.id == session_id,
+            ConsultationSession.clinic_id == current_user.clinic_id,
+        )
     )
     s = result.scalar_one_or_none()
     if s is None:
@@ -66,9 +82,13 @@ async def patch_session(
     session_id: uuid.UUID,
     body: PatchSessionBody,
     db: AsyncSession = Depends(get_db),
+    current_user: UserInfo = Depends(get_current_user),
 ) -> dict:
     result = await db.execute(
-        select(ConsultationSession).where(ConsultationSession.id == session_id)
+        select(ConsultationSession).where(
+            ConsultationSession.id == session_id,
+            ConsultationSession.clinic_id == current_user.clinic_id,
+        )
     )
     s = result.scalar_one_or_none()
     if s is None:
@@ -85,14 +105,14 @@ async def patch_session(
 @router.get("/patient/{patient_id}/sessions")
 async def list_patient_sessions(
     patient_id: uuid.UUID,
-    clinic_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    current_user: UserInfo = Depends(get_current_user),
 ) -> list[dict]:
     result = await db.execute(
         select(ConsultationSession)
         .where(
             ConsultationSession.patient_id == patient_id,
-            ConsultationSession.clinic_id == clinic_id,
+            ConsultationSession.clinic_id == current_user.clinic_id,
         )
         .order_by(ConsultationSession.created_at.desc())
     )

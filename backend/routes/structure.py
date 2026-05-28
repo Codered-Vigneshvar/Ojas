@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import settings
 from database import get_db
 from models import ConsultationSession
+from services.auth import UserInfo, get_current_user
 from services.llm import structure_prescription, structure_transcript
 from services.ocr import extract_text_from_image
 
@@ -21,7 +22,9 @@ class StructureTranscriptBody(BaseModel):
 
 @router.post("/structure/transcript")
 async def structure_transcript_endpoint(
-    body: StructureTranscriptBody, db: AsyncSession = Depends(get_db)
+    body: StructureTranscriptBody,
+    db: AsyncSession = Depends(get_db),
+    current_user: UserInfo = Depends(get_current_user),
 ) -> dict:
     result = await db.execute(
         select(ConsultationSession).where(ConsultationSession.id == body.session_id)
@@ -44,6 +47,7 @@ async def structure_transcript_endpoint(
 
 @router.post("/structure/prescription")
 async def structure_prescription_endpoint(
+    current_user: UserInfo = Depends(get_current_user),
     session_id: str = Form(...),
     image: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
@@ -61,12 +65,13 @@ async def structure_prescription_endpoint(
         raise HTTPException(status_code=404, detail="Session not found")
 
     image_bytes = await image.read()
+    mime_type = image.content_type or "image/jpeg"
     ext = pathlib.Path(image.filename or "prescription.jpg").suffix or ".jpg"
     image_filename = f"{session_id}{ext}"
     image_path = pathlib.Path(settings.uploads_dir) / image_filename
     image_path.write_bytes(image_bytes)
 
-    ocr_text = await extract_text_from_image(image_bytes)
+    ocr_text = await extract_text_from_image(image_bytes, mime_type)
     summary = await structure_prescription(ocr_text, s.raw_transcript)
 
     s.prescription_storage_key = str(image_path)

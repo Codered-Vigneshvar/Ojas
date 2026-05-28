@@ -1,12 +1,42 @@
 import uuid
 
-from sqlalchemy import Column, DateTime, Text, func
+from sqlalchemy import Column, DateTime, Integer, Text, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase
+
+DEMO_CLINIC_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
 class Base(DeclarativeBase):
     pass
+
+
+class Patient(Base):
+    __tablename__ = "patients"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    clinic_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    name = Column(Text, nullable=False)
+    phone = Column(Text, nullable=True)
+    age = Column(Integer, nullable=True)
+    gender = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    clinic_id = Column(UUID(as_uuid=True), nullable=False)
+    username = Column(Text, unique=True, nullable=False)
+    password_hash = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class ConsultationSession(Base):
@@ -17,6 +47,7 @@ class ConsultationSession(Base):
     clinic_id = Column(UUID(as_uuid=True), nullable=False, index=True)
 
     raw_transcript = Column(Text, nullable=True)
+    doctor_notes = Column(Text, nullable=True)
     structured_note = Column(JSONB, nullable=True)
     tags = Column(JSONB, nullable=True)  # list[str]
     prescription_storage_key = Column(Text, nullable=True)  # matches artifacts.storage_key naming

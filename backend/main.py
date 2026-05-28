@@ -6,6 +6,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
+from routes.auth import router as auth_router
+from routes.patients import router as patients_router
 from routes.sessions import router as sessions_router
 from routes.structure import router as structure_router
 from routes.transcribe import router as transcribe_router
@@ -27,6 +29,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router)
+app.include_router(patients_router)
 app.include_router(sessions_router)
 app.include_router(transcribe_router)
 app.include_router(structure_router)

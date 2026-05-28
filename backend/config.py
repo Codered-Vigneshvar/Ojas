@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="")
     uploads_dir: str = Field(default="./uploads")
     openai_model: str = Field(default="gpt-4o")
+    secret_key: str = Field(default="change-me-before-production")
 
 
 settings = Settings()

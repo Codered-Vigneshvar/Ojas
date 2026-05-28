@@ -1,10 +1,12 @@
+from __future__ import annotations
+
 import httpx
 
 from config import settings
 
 
 async def transcribe_audio(audio_bytes: bytes, filename: str, content_type: str) -> str:
-    """Send audio to Deepgram and return transcript text."""
+    """Send audio to Deepgram and return the plain transcript text."""
     async with httpx.AsyncClient(timeout=60.0) as client:
         response = await client.post(
             "https://api.deepgram.com/v1/listen",
