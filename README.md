@@ -1,31 +1,27 @@
-# Ojas — AI-Powered Clinical Workspace
+# Ojas — Clinical Patient Management Workspace
 
-> **Ojas** (Sanskrit: ओजस् — "vitality, life force") is a full-stack patient management system for doctors. Capture consultation data through notes, audio, and documents — Ojas automatically structures, consolidates, and answers questions about it using AI.
+> **Ojas** (Sanskrit: ओजस् — "vitality, life force") is a full-stack, AI-powered patient management workspace that lets doctors capture consultation data through notes, audio, and documents — and automatically structures, consolidates, and summarizes everything using GPT-4o.
 
 ---
 
 ## What It Does
 
-Instead of manual data entry across disconnected screens, Ojas lets doctors:
-
-1. **Capture** — record audio, upload prescriptions/reports, type notes
-2. **Structure** — AI automatically extracts diagnoses, medications, lab results
-3. **Consolidate** — a single AI-generated summary updates automatically as data changes
-4. **Query** — ask natural-language questions, get answers cited back to source artifacts
+Instead of manual data entry, doctors capture raw clinical data in any form. Ojas processes it in the background, builds a unified **clinical manifest** from all artifacts, and uses that to power an AI summary and contextual Q&A — all without hallucination, because the AI only uses facts from the manifest.
 
 ---
 
 ## Tech Stack
 
 | Layer | Technology |
-|---|---|
-| Frontend | React 18 · TypeScript · Vite · TailwindCSS · TanStack Query |
+|-------|-----------|
 | Backend | Python 3.11 · FastAPI · SQLAlchemy 2.0 (async) · Alembic |
-| Database | PostgreSQL 16 (pgvector enabled) |
-| Object Storage | MinIO (S3-compatible) |
+| Frontend | React 18 · TypeScript · Vite · TailwindCSS · TanStack Query |
+| Database | PostgreSQL 16 + pgvector |
 | Cache | Redis 7 |
-| AI / LLM | OpenAI GPT-4o · GPT-4o-mini · GPT-4o Vision |
-| Speech-to-Text | Deepgram nova-2 (cloud) · faster-whisper (local fallback) |
+| Object Storage | MinIO (S3-compatible) |
+| AI / LLM | OpenAI GPT-4o, GPT-4o-mini, GPT-4o Vision |
+| Speech-to-Text | Deepgram nova-2 (fallback: faster-whisper) |
+| Auth | JWT + bcrypt |
 | Logging | structlog (structured JSON) |
 
 ---
@@ -33,449 +29,436 @@ Instead of manual data entry across disconnected screens, Ojas lets doctors:
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                  Frontend (React · Vite)                │
-│  Home.tsx           Patient.tsx           Modals        │
-│  └─ Patient list    ├─ ConsultationHistory              │
-│                     ├─ ConsultationScribe (chat+summary)│
-│                     ├─ SnippetSidebar (artifact list)   │
-│                     └─ SnippetDetail (edit/view)        │
-└────────────────────────┬────────────────────────────────┘
-                         │ REST / JSON
-┌────────────────────────┴────────────────────────────────┐
-│               Backend (FastAPI · Python)                │
-│                                                         │
-│  Routes          Services              Repositories     │
-│  ├─ patients     ├─ patient_service    ├─ patient_repo  │
-│  ├─ artifacts    ├─ artifact_service   └─ artifact_repo │
-│  ├─ consults     ├─ consolidation_svc                   │
-│  └─ ai           ├─ llm_service                         │
-│                  ├─ ocr_service                         │
-│                  ├─ labeling_service                    │
-│                  └─ stt_deepgram                        │
-└────────────────────────┬────────────────────────────────┘
-                         │
-┌────────────────────────┴────────────────────────────────┐
-│               Infrastructure (Docker Compose)           │
-│  PostgreSQL 16 :5432   Redis 7 :6379   MinIO :9000      │
-└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────┐
+│              Frontend  (React + Vite :5173)         │
+│  Home.tsx          Patient.tsx         Modals        │
+│  PatientList       ConsultationScribe  RecordModal   │
+│  CreatePatient     SnippetSidebar      NoteModal     │
+│                    ConsultationHistory UploadModal   │
+└──────────────────────────┬──────────────────────────┘
+                           │ REST / JSON
+┌──────────────────────────┴──────────────────────────┐
+│              Backend  (FastAPI :8000)               │
+│                                                     │
+│  Routes          Services            Repositories   │
+│  /patients       PatientService      PatientRepo    │
+│  /consultations  ArtifactService     ArtifactRepo   │
+│  /artifacts      ConsolidationSvc                   │
+│  /ai             LLMService                         │
+│  /health         OCRService                         │
+│                  LabelingService                    │
+│                  STTService (Deepgram)               │
+└──────────────────────────┬──────────────────────────┘
+                           │
+┌──────────────────────────┴──────────────────────────┐
+│              Infrastructure  (Docker Compose)       │
+│  PostgreSQL 16 :5432   Redis 7 :6379                │
+│  MinIO :9000 (API)     MinIO :9001 (Console UI)     │
+└─────────────────────────────────────────────────────┘
 ```
 
 ---
 
 ## Database Design
 
-### Schema Overview
+### Tables
+
+#### `clinics`
+Organizational root. Everything is scoped to a clinic.
 
 ```
-clinics
-  └── users (FK: clinic_id)
-  └── patients (FK: clinic_id, UNIQUE phone_e164 per clinic)
-        └── consultations (FK: patient_id, clinic_id)
-              ├── artifacts (FK: consultation_id, parent_id self-ref)
-              └── consultation_messages (FK: consultation_id)
-
-audit_logs (append-only, every mutation)
+id UUID PK | name VARCHAR | created_at | updated_at
 ```
 
-### Table Definitions
+#### `users`
+Doctor/staff accounts per clinic.
 
-**`clinics`** — root organizational unit
-```sql
-id             UUID  PK
-name           VARCHAR(255)
-created_at     TIMESTAMP
-updated_at     TIMESTAMP
+```
+id UUID PK | clinic_id FK→clinics | name VARCHAR | role VARCHAR DEFAULT 'doctor'
+created_at | updated_at
 ```
 
-**`users`** — doctor/staff accounts
-```sql
-id             UUID  PK
-clinic_id      UUID  FK → clinics
-name           VARCHAR(255)
-role           VARCHAR(50)  DEFAULT 'doctor'
+#### `patients`
+One row per patient per clinic. Phone number (E.164) is the identity key.
+
+```
+id UUID PK
+clinic_id FK→clinics
+name VARCHAR(255)
+phone_e164 VARCHAR(20)         -- normalized to +91XXXXXXXXXX
+last_accessed_at TIMESTAMP     -- updated on every patient "open"
+created_at | updated_at
+
+UNIQUE (clinic_id, phone_e164) -- one patient per phone per clinic
+INDEX  (clinic_id, last_accessed_at DESC)
 ```
 
-**`patients`** — one row per patient per clinic
-```sql
-id               UUID  PK
-clinic_id        UUID  FK → clinics
-name             VARCHAR(255)
-phone_e164       VARCHAR(20)        -- normalized +91XXXXXXXXXX
-last_accessed_at TIMESTAMP
--- UNIQUE (clinic_id, phone_e164)   prevents duplicate phone per clinic
--- INDEX  (clinic_id, last_accessed_at DESC) for "recent patients" query
+#### `consultations`
+One per visit/session. Holds the compiled AI output for the whole visit.
+
+```
+id UUID PK
+patient_id FK→patients (CASCADE)
+clinic_id FK→clinics (CASCADE)
+title VARCHAR(500)
+notes TEXT
+summary_text TEXT              -- AI-generated markdown summary (GPT-4o output)
+suggested_questions JSONB      -- ["What is the follow-up plan?", ...]
+clinical_manifest JSONB        -- Compiled timeline of all artifacts, used as LLM context
+created_at | updated_at
+
+INDEX (patient_id, created_at DESC)
 ```
 
-**`consultations`** — one row per patient visit/session
-```sql
-id                   UUID  PK
-patient_id           UUID  FK → patients  CASCADE
-clinic_id            UUID  FK → clinics   CASCADE
-title                VARCHAR(500)
-notes                TEXT
-summary_text         TEXT       -- AI-generated markdown overview
-suggested_questions  JSONB      -- ["What is the diagnosis?", ...]
-clinical_manifest    JSONB      -- compiled timeline of all artifacts
--- INDEX (patient_id, created_at DESC)
+#### `artifacts`
+Core data table. Every note, audio clip, image, and file is an artifact.
+
+```
+id UUID PK
+patient_id FK→patients (CASCADE)
+consultation_id FK→consultations (SET NULL)  -- optional
+parent_id FK→artifacts (CASCADE)             -- artifact hierarchy
+clinic_id FK→clinics (CASCADE)
+
+type VARCHAR(50)        -- "note" | "audio" | "image" | "file" | "prescription" | "report"
+title VARCHAR(500)      -- AI auto-labeled or user-provided
+summary VARCHAR(500)
+
+-- File storage
+storage_key VARCHAR(1000)   -- MinIO/S3 path (null for plain notes)
+mime_type VARCHAR(200)
+size_bytes BIGINT
+duration_seconds INT        -- audio only
+
+-- Text content
+text_content TEXT           -- plain text for notes; OCR or transcript text
+raw_transcript TEXT         -- raw Deepgram output
+structured_note JSONB       -- {chief_complaint, diagnosis, treatment_plan, medications, follow_up}
+tags JSONB                  -- ["infection", "hypertension", ...]
+
+-- Prescription fields
+prescription_ocr_text TEXT  -- raw text extracted by GPT-4o Vision
+prescription_summary JSONB  -- {medications:[...], lab_results:[...], patient_metadata:{...}}
+doctor_confirmed_at TIMESTAMP
+
+metadata JSONB
+created_at | updated_at
+
+INDEX (patient_id, created_at DESC)
+INDEX (consultation_id)
 ```
 
-**`artifacts`** — files, notes, audio, prescriptions, reports
-```sql
-id                    UUID   PK
-patient_id            UUID   FK → patients      CASCADE
-consultation_id       UUID   FK → consultations SET NULL
-parent_id             UUID   FK → artifacts     CASCADE  -- hierarchy
-clinic_id             UUID   FK → clinics       CASCADE
-type                  VARCHAR(50)   -- note | audio | image | file | prescription | report
-title                 VARCHAR(500)  -- AI-labeled or user-provided
-summary               VARCHAR(500)
-storage_key           VARCHAR(1000) -- MinIO object path (null for notes)
-mime_type             VARCHAR(200)
-size_bytes            BIGINT
-text_content          TEXT          -- notes or transcripts
-duration_seconds      INT           -- audio only
-raw_transcript        TEXT          -- Deepgram output
-structured_note       JSONB         -- {chief_complaint, diagnosis, treatment_plan, medications, follow_up}
-tags                  JSONB         -- ["infection", "follow_up", ...]
-prescription_ocr_text TEXT          -- raw GPT-4o Vision OCR
-prescription_summary  JSONB         -- {medications:[...], lab_results:[...], patient_meta:{...}}
-doctor_confirmed_at   TIMESTAMP     -- when doctor verified extraction
-metadata              JSONB
--- INDEX (patient_id, created_at DESC)
--- INDEX (consultation_id)
+#### `consultation_messages`
+Full chat history per consultation.
+
+```
+id UUID PK
+consultation_id FK→consultations (CASCADE)
+role VARCHAR(50)    -- "user" | "assistant"
+content TEXT
+created_at | updated_at
 ```
 
-**`consultation_messages`** — persistent chat history
-```sql
-id                UUID  PK
-consultation_id   UUID  FK → consultations  CASCADE
-role              VARCHAR(50)  -- user | assistant
-content           TEXT
-```
+#### `audit_logs`
+Every mutation is logged for compliance.
 
-**`audit_logs`** — append-only compliance trail
-```sql
-id               UUID  PK
-actor_user_id    UUID  (nullable)
-action           VARCHAR(100)   -- patient.create | artifact.edit | artifact.delete
-resource_type    VARCHAR(100)
-resource_id      UUID
-metadata         JSONB
-created_at       TIMESTAMP  (no updated_at — never mutated)
+```
+id UUID PK
+actor_user_id UUID
+action VARCHAR(100)        -- "patient.create" | "artifact.edit" | "artifact.delete"
+resource_type VARCHAR(100) -- "patient" | "artifact" | "consultation"
+resource_id UUID
+metadata JSONB
+created_at TIMESTAMP
+
+INDEX (actor_user_id, created_at DESC)
 ```
 
 ### Migration History
 
-| File | What Changed |
-|---|---|
-| `0001_initial.py` | Base structure |
-| `0002_core_tables.py` | clinics, users, patients, artifacts, audit_logs |
-| `0005_ai_columns.py` | raw_transcript, structured_note, tags, prescription_* on artifacts |
-| `0006_consultations.py` | consultations table + FK from artifacts |
-| `7de6e73_add_parent_id_to_artifacts.py` | parent_id self-FK for artifact hierarchy |
-| `8fd8901_add_consultation_messages_table.py` | consultation_messages for chat history |
-| `b3ccf3b_add_summary_text_suggested_questions_.py` | summary_text, suggested_questions, clinical_manifest on consultations |
+| File | What changed |
+|------|-------------|
+| `0001_initial` | Base structure |
+| `0002_core_tables` | clinics, users, patients, artifacts, audit_logs |
+| `0005_ai_columns` | raw_transcript, structured_note, tags, prescription_* on artifacts |
+| `0006_consultations` | consultations table + FK from artifacts |
+| `7de6e73...` | parent_id FK on artifacts (hierarchy) |
+| `8fd8901...` | consultation_messages table |
+| `b3ccf3b...` | summary_text, suggested_questions, clinical_manifest on consultations |
 
 ---
 
-## Features — How Each One Works
+## Features & Implementation Details
 
 ### 1. Patient Management
 
-**Phone as identity key.** Patients are looked up and deduplicated by phone number. On creation, the backend normalizes any Indian phone format to E.164 (`+91XXXXXXXXXX`) using `patient_service.normalize_phone()`. The `UNIQUE (clinic_id, phone_e164)` constraint enforces no duplicates at the DB level.
-
-`GET /patients?q=...` runs a search against both name and phone. `POST /patients/{id}/open` touches `last_accessed_at` so the home screen can show recently-opened patients.
-
----
-
-### 2. Consultation Workspaces
-
-Each patient visit is a **Consultation** — an isolated workspace that owns a set of artifacts, a summary, a chat history, and a compiled `clinical_manifest`. Consultations are listed newest-first; clicking one opens the full workspace with all its artifacts and AI summary.
+**How it works:**
+- Phone numbers are normalized to E.164 on write (`PatientService.normalize_phone`)
+- A `UNIQUE (clinic_id, phone_e164)` constraint prevents duplicate patients
+- `last_accessed_at` is bumped every time a patient workspace is opened — powers the "recent patients" list
+- Search queries name and phone columns with `ILIKE`
 
 ---
 
-### 3. Artifact Capture (Notes, Audio, Files)
+### 2. Artifact Capture (Notes, Audio, Files)
 
-Three capture paths feed into the same `artifacts` table:
+Three capture paths, all converging into the `artifacts` table:
 
-**Text Notes** → `POST /patients/{id}/artifacts/note`
-- Saves `text_content`, queues background labeling
-- `labeling_service.label_note(text)` calls gpt-4o-mini → sets `title` (≤60 chars)
+**Text Note** → `POST /patients/{id}/artifacts/note`
+- Saved as `type="note"`, `text_content=<text>`
+- Background: `label_note()` → GPT-4o-mini generates a short title (≤60 chars)
+- Background: `consolidate_consultation()` triggered if attached to a consultation
 
 **Audio Recording** → `POST /patients/{id}/artifacts/audio`
-- Frontend uses `MediaRecorder` API (`useRecorder.ts`) to capture mic audio as a blob
-- Blob POSTed to backend → saved to MinIO → `type="audio"` artifact created
-- Background task: download from MinIO → Deepgram nova-2 STT → save `raw_transcript`
-- Then: `llm_service.structure_transcript(transcript)` via GPT-4o → save `structured_note` + `tags`
-- Then: `labeling_service.label_audio(transcript)` → update `title`
-- Then: trigger consolidation
+- Audio blob saved to MinIO → artifact created with `storage_key`
+- Background pipeline:
+  1. Download audio from MinIO
+  2. Deepgram nova-2 → `raw_transcript`
+  3. `structure_transcript()` → GPT-4o → `structured_note` + `tags`
+  4. `label_audio()` → GPT-4o-mini → `title`
+  5. `consolidate_consultation()` triggered
 
 **File / Image Upload** → `POST /patients/{id}/artifacts/upload`
-- Saved to MinIO, artifact created with `mime_type` + `size_bytes`
-- Background label: `labeling_service.label_file(filename, mime_type)` → `title` + category
-- If image: `ocr_service.extract_text_from_image(bytes)` via GPT-4o Vision → `prescription_ocr_text`
-- Then: `llm_service.structure_prescription(ocr_text)` → `prescription_summary` JSON
-- Then: trigger consolidation
+- File saved to MinIO → artifact created
+- For images, background OCR pipeline:
+  1. Download image from MinIO
+  2. GPT-4o Vision → `prescription_ocr_text`
+  3. GPT-4o → `prescription_summary` JSON (medications, lab results, patient metadata)
+  4. `label_file()` → GPT-4o-mini → `title`
+  5. `consolidate_consultation()` triggered
 
 ---
 
-### 4. AI Structuring
+### 3. Full Context Injection — The Consolidation Pipeline
 
-**Transcript → Structured Note**
-```
-raw_transcript (Deepgram text)
-       ↓
-  GPT-4o prompt: extract clinical fields
-       ↓
-structured_note: {
-  chief_complaint, diagnosis, treatment_plan,
-  medications: [{name, dosage, frequency}],
-  follow_up_instructions
+This is the core AI architecture. Instead of RAG (retrieving embeddings), Ojas compiles **every artifact** for a consultation into a single JSON timeline and injects it directly into the LLM system prompt.
+
+**Why this approach:**
+- Consultations are bounded (1 visit ≈ a few KB of text — fits in context easily)
+- Enables the LLM to resolve contradictions because it sees the full timeline
+- No retrieval errors — nothing is left out
+
+**Trigger points** (via FastAPI `BackgroundTasks`):
+- Artifact created in a consultation
+- Artifact `PATCH`ed (doctor edits structured note or prescription JSON)
+- Artifact deleted from a consultation
+
+**Pipeline** (`consolidation_service.py`):
+1. Fetch all artifacts for the consultation, ordered `created_at ASC`
+2. Build `clinical_manifest`:
+```json
+{
+  "consultation_id": "...",
+  "patient": {"name": "...", "phone": "..."},
+  "snippets": [
+    {
+      "id": "...",
+      "type": "audio",
+      "title": "Morning Dictation",
+      "created_at": "2026-05-29T09:00:00",
+      "content": {
+        "transcript": "Patient reports ...",
+        "structured_note": { "chief_complaint": "...", "diagnosis": "..." }
+      }
+    }
+  ]
 }
-tags: ["hypertension", "follow_up_required"]
 ```
+3. Inject manifest into GPT-4o system prompt
+4. GPT-4o returns structured markdown summary + suggested questions array
+5. `summary_text` and `suggested_questions` saved to consultation row
+6. `clinical_manifest` saved (reused for Q&A without recompiling)
 
-**Prescription Image → Summary**
-```
-image bytes
-    ↓
-GPT-4o Vision (OCR) → prescription_ocr_text
-    ↓
-GPT-4o (structuring) → prescription_summary: {
-  medications: [{name, dosage, frequency, duration}],
-  lab_results: [{test, value, unit, reference_range}],
-  patient_meta: {age, weight, ...}
-}
-```
-
-Doctors can open **SnippetDetail** in the frontend to edit the raw JSON directly if the AI made a mistake (e.g., "500mg" read as "50mg"). Saving triggers background re-consolidation.
+**Prompt engineering highlights:**
+- AI is forbidden from suggesting questions whose answers aren't in the manifest
+- Contradictions resolved by always prioritizing the latest snippet in the timeline
+- Forced `Patient Details` section merges DB fields + any demographics in notes
 
 ---
 
-### 5. AI Consolidation — Full Context Injection
+### 4. Editable Structured Data (JSON Editor)
 
-Ojas deliberately avoids RAG. Instead it uses **Full Context Injection**:
+OCR and LLM extractions aren't perfect. A drug name might be misread, a dosage might be wrong.
 
-```
-All artifacts for consultation (chronological)
-         ↓
-Build clinical_manifest (JSON timeline)
-         ↓
-Inject entire manifest into GPT-4o system prompt
-         ↓
-One API call → summary_text (markdown) + suggested_questions (array)
-         ↓
-Save to consultation row
-```
-
-**Why not RAG?** Consultations typically have 3–15 artifacts — small enough to fit in a single context window. Full injection means the LLM sees all contradictions (e.g., a changed appointment date) and the prompt explicitly instructs it to prioritize the latest snippet.
-
-**Background auto-trigger:** Every artifact `PATCH` or `DELETE` queues `_trigger_consolidation` via FastAPI `BackgroundTasks`. The summary is always current without any manual "regenerate" button.
-
-**Contradiction resolution in the prompt:**
-> "If snippets contain contradictory information (e.g. appointment dates), ALWAYS prioritize the LATEST snippet in the timeline."
-
-**Hallucination guard on suggested questions:**
-> "CRITICAL: You are FORBIDDEN from suggesting a question if the answer is not explicitly present in the snippets."
+**How it works:**
+- `SnippetDetail.tsx` renders a raw JSON editor for `structured_note` and `prescription_summary`
+- Doctor edits directly in the UI
+- `PATCH /artifacts/{id}` saves the corrected JSON to the DB
+- Background task automatically re-consolidates — the summary and Q&A reflect the correction immediately
+- `doctor_confirmed_at` timestamp set via `POST /ai/artifacts/{id}/confirm`
 
 ---
 
-### 6. Intelligent Q&A (Chat)
+### 5. Voice Correction
 
-`POST /consultations/{id}/ask` — accepts a question + uses existing message history as context.
+Doctor speaks a correction ("change the dosage to 500mg") instead of typing.
 
-```
-consultation.clinical_manifest (pre-compiled)
-  + chat history (consultation_messages)
-  + new question
-       ↓
-GPT-4o with strict system prompt:
-  "Answer ONLY using facts in the manifest.
-   Cite sources as [Snippet Title](snippet://<id>)"
-       ↓
-assistant response saved to consultation_messages
-       ↓
-Frontend renders markdown with clickable snippet links
-```
-
-Source citations are rendered as clickable links in the frontend. Clicking `[snippet://uuid]` opens that artifact in SnippetDetail.
+**How it works:**
+1. Audio recorded → Deepgram transcribes correction text
+2. `POST /ai/artifacts/{id}/voice-edit` with correction text
+3. `llm_service.apply_voice_correction` receives current `structured_note` + correction text
+4. LLM returns updated note with only the specified field changed (field-level updates only — no hallucinated additions)
+5. Saved → background consolidation triggered
 
 ---
 
-### 7. Voice Corrections
+### 6. Contextual Q&A (Chat)
 
-`POST /ai/artifacts/{id}/voice-edit`
+Doctors ask questions about the current consultation without leaving the workspace.
 
-Doctor speaks a correction ("change the dosage to 500mg") while viewing a structured note. The frontend sends the voice correction text + the current `structured_note` JSON to the backend.
+**How it works:**
+1. `POST /consultations/{id}/ask` with question
+2. Backend fetches `clinical_manifest` from consultation row (pre-compiled)
+3. Builds: `[system: manifest, ...history, user: question]`
+4. GPT-4o responds with answer + source citations as `[Snippet Title](snippet://<artifact_id>)` links
+5. Both messages saved to `consultation_messages`
+6. Frontend renders markdown, makes `snippet://` links clickable → jumps to artifact in sidebar
 
-```
-current structured_note (JSON) + voice correction (text)
-        ↓
-GPT-4o: apply correction, update only the mentioned fields
-        ↓
-updated structured_note saved
-        ↓
-background: trigger consolidation
-```
+**Hallucination prevention:** LLM explicitly instructed to say "I don't have that information" if the fact isn't in the manifest.
 
-Only fields explicitly mentioned in the correction are modified. All other fields are preserved exactly.
+---
+
+### 7. Speech-to-Text
+
+Two providers, switchable via `STT_PROVIDER` env var:
+
+**Deepgram nova-2 (default/recommended):**
+- Cloud API, ~300ms latency
+- Language detection, smart punctuation
+- Used for both live partial transcription (`/ai/transcribe-bytes`) and saved artifact transcription
+
+**faster-whisper (local fallback):**
+- Runs on CPU, no API key needed
+- Configurable model size (`small|medium|large`)
+- Slower but fully offline
 
 ---
 
 ### 8. Auto-Labeling
 
-Every artifact gets a short, human-readable title auto-generated by `gpt-4o-mini` (cheap + fast):
+Every artifact gets a short, descriptive title automatically.
 
-- Audio → `label_audio(transcript)` → e.g. "Follow-up: chest pain & ECG"
-- Note → `label_note(text)` → e.g. "BP medication adjustment"
-- File → `label_file(filename, mime_type)` → e.g. "CBC Report - May 2026"
-
-Max 60 characters. Runs as a background task so the artifact is available in the UI immediately.
+**How it works:**
+- `LabelingService` calls GPT-4o-mini (fast + cheap) with artifact content
+- `label_audio(transcript)` → e.g. "Morning Dictation — Chest Pain"
+- `label_note(text)` → e.g. "Follow-up Instructions — Hypertension"
+- `label_file(filename, mime_type)` → e.g. "CBC Report — 29 May" + category tag
+- All labeling runs in background tasks — never blocks the API response
 
 ---
 
 ## API Reference
 
 ### Patients
-```
-POST   /patients                          Create patient (name, phone)
-GET    /patients?q=<search>               List recent / search
-GET    /patients/{id}                     Get patient
-POST   /patients/{id}/open                Touch last_accessed_at
-```
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/patients` | Create patient (normalizes phone to E.164) |
+| `GET` | `/patients` | List recent patients or search by `?q=` |
+| `GET` | `/patients/{id}` | Get patient details |
+| `POST` | `/patients/{id}/open` | Bump last_accessed_at, return artifact count |
 
 ### Consultations
-```
-POST   /patients/{id}/consultations       Create consultation
-GET    /patients/{id}/consultations       List consultations
-GET    /consultations/{id}                Get consultation + summary
-PATCH  /consultations/{id}                Update title/notes
-DELETE /consultations/{id}                Delete
-GET    /consultations/{id}/summary        AI summary + suggested questions
-GET    /consultations/{id}/messages       Chat history
-POST   /consultations/{id}/ask            Ask a question
-DELETE /consultations/{id}/messages/{id}  Delete a message
-```
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/patients/{id}/consultations` | Create consultation |
+| `GET` | `/patients/{id}/consultations` | List consultations |
+| `GET` | `/consultations/{id}` | Get consultation |
+| `PATCH` | `/consultations/{id}` | Update title/notes |
+| `DELETE` | `/consultations/{id}` | Delete (orphans artifacts) |
+| `GET` | `/consultations/{id}/summary` | Get AI summary + suggested questions |
+| `GET` | `/consultations/{id}/messages` | Chat history |
+| `POST` | `/consultations/{id}/ask` | Ask a question |
+| `DELETE` | `/consultations/{id}/messages/{msg_id}` | Delete message |
 
 ### Artifacts
-```
-GET    /patients/{id}/artifacts           List (filter: consultation_id, q)
-POST   /patients/{id}/artifacts/upload    Upload file/image
-POST   /patients/{id}/artifacts/note      Create text note
-POST   /patients/{id}/artifacts/audio     Save audio blob
-GET    /artifacts/{id}                    Get artifact
-PATCH  /artifacts/{id}                    Update (title, text, structured_note, etc.)
-DELETE /artifacts/{id}                    Delete + remove from storage
-GET    /artifacts/{id}/download           Presigned S3 download URL
-```
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/patients/{id}/artifacts` | List artifacts (filter by consultation_id, search) |
+| `POST` | `/patients/{id}/artifacts/upload` | Upload file/image |
+| `POST` | `/patients/{id}/artifacts/note` | Create text note |
+| `POST` | `/patients/{id}/artifacts/audio` | Save audio blob |
+| `GET` | `/artifacts/{id}` | Get artifact |
+| `PATCH` | `/artifacts/{id}` | Update (title, text, structured_note, prescription_summary) |
+| `DELETE` | `/artifacts/{id}` | Delete + remove from storage |
+| `GET` | `/artifacts/{id}/download` | Get presigned MinIO download URL |
 
-### AI
-```
-POST   /ai/transcribe-bytes               Transcribe audio without saving (live preview)
-POST   /ai/artifacts/{id}/transcribe      Download audio → Deepgram → save transcript
-POST   /ai/artifacts/{id}/structure       Structure transcript with GPT-4o
-POST   /ai/artifacts/{id}/ocr             OCR image → structure prescription
-POST   /ai/artifacts/{id}/confirm         Mark artifact as doctor-confirmed
-POST   /ai/artifacts/{id}/voice-edit      Apply voice correction to structured note
-```
+### AI Services
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/ai/transcribe-bytes` | Transcribe audio without saving to DB |
+| `POST` | `/ai/artifacts/{id}/transcribe` | Download audio → Deepgram → save transcript |
+| `POST` | `/ai/artifacts/{id}/structure` | Structure raw transcript with GPT-4o |
+| `POST` | `/ai/artifacts/{id}/ocr` | OCR image → structure prescription |
+| `POST` | `/ai/artifacts/{id}/confirm` | Mark artifact as doctor-confirmed |
+| `POST` | `/ai/artifacts/{id}/voice-edit` | Apply spoken correction to structured note |
 
 ### Health
-```
-GET    /health                            DB + Redis connectivity check
-```
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/health` | Check DB + Redis connectivity |
 
 ---
 
-## Data Flow: Audio Recording End-to-End
+## Data Flow Walkthroughs
+
+### Recording a Consultation
 
 ```
-1. Doctor clicks "Record" in RecordModal.tsx
-   └─ useRecorder.ts starts MediaRecorder (Web Audio API)
-
-2. While speaking, frontend periodically POSTs partial audio chunks to:
-   POST /ai/transcribe-bytes  →  Deepgram  →  live transcript shown in UI
-
-3. Doctor clicks "Stop"
-   └─ Final audio blob POSTed to POST /patients/{id}/artifacts/audio
-
-4. Backend (synchronous, fast):
-   └─ Save blob → MinIO
-   └─ Create artifact row (type="audio", storage_key set)
-   └─ Return artifact to frontend immediately
-
-5. Backend (background task):
-   ├─ Download audio from MinIO
-   ├─ Deepgram nova-2 → raw_transcript saved
-   ├─ GPT-4o structure_transcript → structured_note + tags saved
-   ├─ gpt-4o-mini label_audio → title saved
-   └─ consolidate_consultation:
-       ├─ Fetch all artifacts for consultation
-       ├─ Build clinical_manifest JSON
-       ├─ GPT-4o → summary_text + suggested_questions
-       └─ Save to consultation row
-
-6. Frontend polls artifact every 2s until structured_note is populated
-   └─ Shows structured note in SnippetDetail when ready
+Doctor clicks Record → speaks for 2 minutes
+    ↓
+Frontend streams partial audio → POST /ai/transcribe-bytes (live preview)
+    ↓
+Doctor stops → POST /patients/{id}/artifacts/audio (final blob)
+    ↓
+Backend: saves to MinIO, creates artifact row, returns immediately
+    ↓ (background)
+1. Download audio from MinIO
+2. Deepgram nova-2 → raw_transcript
+3. GPT-4o structure_transcript → structured_note + tags
+4. GPT-4o-mini label_audio → title
+5. consolidate_consultation:
+   → fetch all artifacts for consultation
+   → build clinical_manifest JSON
+   → GPT-4o → summary_text + suggested_questions
+   → save to consultation row
+    ↓
+Frontend polls artifact every 2s until structured_note appears → renders result
 ```
 
----
-
-## Data Flow: Prescription Image Upload
+### Uploading a Prescription Image
 
 ```
-1. Doctor uploads prescription photo via UploadModal.tsx
-   └─ POST /patients/{id}/artifacts/upload
-
-2. Backend (sync):
-   └─ Save to MinIO → create artifact (type="image") → return
-
-3. Background:
-   ├─ gpt-4o-mini label_file(filename, mime) → title
-   ├─ GPT-4o Vision extract_text_from_image → prescription_ocr_text
-   ├─ GPT-4o structure_prescription(ocr_text) →
-   │    prescription_summary: {
-   │      medications: [{name, dosage, frequency, duration}],
-   │      lab_results:  [{test, value, unit, ref_range}],
-   │      patient_meta: {age, weight, ...}
-   │    }
-   └─ consolidate_consultation → updated summary_text
-
-4. Frontend polls until prescription_summary populated
-   └─ Shows medications table + lab results in SnippetDetail
-   └─ Doctor can edit the JSON directly to fix any OCR errors
-   └─ On save → PATCH /artifacts/{id} → background re-consolidation
+Doctor uploads prescription photo
+    ↓
+POST /patients/{id}/artifacts/upload → saved to MinIO, returns immediately
+    ↓ (background)
+1. GPT-4o Vision OCR → prescription_ocr_text
+2. GPT-4o structure_prescription → prescription_summary JSON
+   {medications: [{name, dose, frequency}], lab_results: [...]}
+3. GPT-4o-mini label_file → title
+4. consolidate_consultation triggered
+    ↓
+Frontend polls until prescription_summary populated
+Doctor reviews medications table, edits OCR mistakes in JSON editor
+PATCH /artifacts/{id} → saves correction → consolidation re-runs in background
 ```
 
----
-
-## Project Structure
+### Asking a Question
 
 ```
-OjasAI/
-├── apps/
-│   ├── api/
-│   │   ├── alembic/versions/          # DB migrations (one concern per file)
-│   │   └── src/ojas/
-│   │       ├── main.py                # App factory, router registration, CORS
-│   │       ├── config.py              # Pydantic BaseSettings (all env vars)
-│   │       ├── models/                # SQLAlchemy ORM models
-│   │       ├── schemas/               # Pydantic request/response models
-│   │       ├── routes/                # FastAPI routers (thin layer, no logic)
-│   │       ├── services/              # Business logic + AI orchestration
-│   │       ├── repositories/          # All SQL queries (per-patient scoped)
-│   │       ├── storage/               # S3/MinIO abstraction
-│   │       ├── stt/                   # STT client interface + impls
-│   │       └── core/                  # deps, errors, audit, logging
-│   └── web/
-│       └── src/
-│           ├── pages/                 # Home.tsx, Patient.tsx
-│           ├── components/PatientWorkspace/
-│           ├── hooks/useRecorder.ts   # Web Audio + MediaRecorder
-│           ├── lib/api.ts             # All API calls (Axios)
-│           └── types/index.ts         # TypeScript interfaces
-├── docker-compose.yml                 # PostgreSQL, Redis, MinIO
-└── .env.example
+Doctor types "What medications were prescribed?"
+    ↓
+POST /consultations/{id}/ask
+    ↓
+Backend fetches consultation.clinical_manifest (pre-compiled JSON)
+Builds: [system: manifest context, ...chat_history, user: question]
+    ↓
+GPT-4o responds:
+"Amoxicillin 500mg 3x daily was prescribed. [Prescription Scan](snippet://abc-123)"
+    ↓
+Both messages saved to consultation_messages
+    ↓
+Frontend renders markdown + clickable snippet links → jumps to artifact in sidebar
 ```
 
 ---
@@ -487,76 +470,105 @@ OjasAI/
 - Python 3.11+ with `uv`
 - Node.js 18+ with `pnpm`
 
-### 1. Configure
+### 1. Clone & configure
 ```bash
+git clone https://github.com/your-org/ojas.git && cd ojas
 cp .env.example .env
-# Add OPENAI_API_KEY and DEEPGRAM_API_KEY
+# Add OPENAI_API_KEY and DEEPGRAM_API_KEY to .env
 ```
 
-### 2. Start Infrastructure
+### 2. Start infrastructure
 ```bash
 docker compose up -d
 ```
 
-### 3. Backend
+### 3. Backend setup
 ```bash
 cd apps/api
 uv sync
 uv run alembic upgrade head
-uv run uvicorn src.ojas.main:app --reload --port 8000
 ```
 
-### 4. Frontend
+### 4. Frontend setup
 ```bash
 cd apps/web
 pnpm install
-pnpm dev
+```
+
+### 5. Run everything
+```bash
+./start.sh
 ```
 
 Open **http://localhost:5173**
 
 ---
 
-## Environment Variables
+## Configuration
 
-```bash
-# Database
-DATABASE_URL=postgresql+asyncpg://ojas:ojas_dev@localhost:5432/ojas
-
-# Redis
-REDIS_URL=redis://localhost:6379/0
-
-# Object Storage (MinIO)
-S3_ENDPOINT_URL=http://localhost:9000
-S3_ACCESS_KEY=minioadmin
-S3_SECRET_KEY=minioadmin
-S3_BUCKET=ojas-artifacts
-
-# AI
-OPENAI_API_KEY=sk-proj-...
-OPENAI_MODEL=gpt-4o
-
-# Speech-to-Text
-STT_PROVIDER=deepgram          # or "local" for faster-whisper
-DEEPGRAM_API_KEY=...
-
-# App
-ENVIRONMENT=dev
-LOG_LEVEL=DEBUG
-JWT_SECRET=change-me-in-production
-```
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DATABASE_URL` | `postgresql+asyncpg://ojas:ojas_dev@localhost:5432/ojas` | PostgreSQL connection |
+| `REDIS_URL` | `redis://localhost:6379/0` | Redis connection |
+| `S3_ENDPOINT_URL` | `http://localhost:9000` | MinIO endpoint |
+| `S3_ACCESS_KEY` | `minioadmin` | MinIO access key |
+| `S3_SECRET_KEY` | `minioadmin` | MinIO secret key |
+| `S3_BUCKET` | `ojas-artifacts` | Bucket name |
+| `OPENAI_API_KEY` | — | Required for consolidation, OCR, structuring |
+| `OPENAI_MODEL` | `gpt-4o` | Model used for consolidation |
+| `STT_PROVIDER` | `deepgram` | `deepgram` or `local` |
+| `DEEPGRAM_API_KEY` | — | Required if `STT_PROVIDER=deepgram` |
+| `STT_MODEL_SIZE` | `small` | For local whisper: `small\|medium\|large` |
+| `JWT_SECRET` | `change-me-in-production` | Auth token signing key |
+| `ENVIRONMENT` | `dev` | `dev\|staging\|prod` |
+| `LOG_LEVEL` | `DEBUG` | Logging verbosity |
 
 ---
 
 ## Security
 
-**Per-patient data scoping** — every repository method accepts `patient_id: UUID` and includes it in the SQL `WHERE` clause. Cross-patient data access is structurally impossible at the query level.
+**Per-patient scoping:** Every repository query takes `patient_id: UUID` and includes it in the SQL `WHERE` clause. Cross-patient data leakage is structurally impossible at the query level.
 
-**Audit logging** — every create/update/delete writes an `audit_log` row with actor, action, resource, and timestamp. Append-only (no `updated_at`).
+**Audit logging:** Every mutation (create/edit/delete) writes to `audit_logs` with actor, action, resource type/id, and metadata.
 
-**JWT auth** — bcrypt password hashing, 24h token expiry, `get_current_user` FastAPI dependency on all protected routes.
+**Auth:** JWT tokens, bcrypt password hashing, `get_current_user` dependency injected into all protected routes.
+
+---
+
+## Project Structure
+
+```
+OjasAI/
+├── apps/
+│   ├── api/                          # FastAPI backend
+│   │   ├── src/ojas/
+│   │   │   ├── main.py               # App factory, router registration
+│   │   │   ├── config.py             # Pydantic BaseSettings
+│   │   │   ├── models/               # SQLAlchemy ORM models
+│   │   │   ├── schemas/              # Pydantic request/response models
+│   │   │   ├── routes/               # FastAPI routers (thin)
+│   │   │   ├── services/             # Business logic & orchestration
+│   │   │   ├── repositories/         # Data access layer (SQL)
+│   │   │   ├── storage/              # MinIO/S3 abstraction
+│   │   │   ├── stt/                  # STT client interfaces
+│   │   │   └── core/                 # Deps, errors, audit, logging
+│   │   └── alembic/versions/         # DB migrations
+│   │
+│   └── web/                          # React + Vite frontend
+│       └── src/
+│           ├── pages/                # Home.tsx, Patient.tsx
+│           ├── components/           # PatientWorkspace/* modals
+│           ├── hooks/                # useRecorder.ts
+│           ├── lib/                  # api.ts, queryClient, utils
+│           └── types/                # TypeScript interfaces
+│
+├── docker-compose.yml
+├── .env.example
+└── start.sh
+```
 
 ---
 
 ## License
+
 MIT
