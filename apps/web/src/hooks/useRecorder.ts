@@ -4,6 +4,7 @@ export type RecorderState =
   | "idle"
   | "requesting_mic"
   | "recording"
+  | "paused"
   | "stopping"
   | "error";
 
@@ -15,6 +16,9 @@ interface UseRecorderResult {
   errorMessage: string | null;
   start: () => Promise<void>;
   stop: () => void;
+  pause: () => void;
+  resume: () => void;
+  getPartialBlob: () => Blob | null;
   reset: () => void;
 }
 
@@ -89,17 +93,17 @@ export function useRecorder(): UseRecorderResult {
       mr.onstop = async () => {
         const blob = new Blob(chunksRef.current, { type: mimeType });
         setAudioBlob(blob);
-        
+
         try {
-            const arrayBuffer = await blob.arrayBuffer();
-            const audioCtx = new AudioContext();
-            const decoded = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
-            setDurationSeconds(decoded.duration);
-            audioCtx.close();
+          const arrayBuffer = await blob.arrayBuffer();
+          const audioCtx = new AudioContext();
+          const decoded = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
+          setDurationSeconds(decoded.duration);
+          audioCtx.close();
         } catch (err) {
-            console.error("Failed to decode audio duration:", err);
+          console.error("Failed to decode audio duration:", err);
         }
-        
+
         setState("stopping");
       };
 
@@ -119,6 +123,35 @@ export function useRecorder(): UseRecorderResult {
     }
   }, [startAnalyser]);
 
+  const pause = useCallback(() => {
+    const mr = mediaRecorderRef.current;
+    if (!mr || mr.state !== "recording") return;
+    // requestData() fires ondataavailable with all chunks accumulated so far
+    mr.requestData();
+    mr.pause();
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    stopAnalyser();
+    setState("paused");
+  }, [stopAnalyser]);
+
+  const resume = useCallback(() => {
+    const mr = mediaRecorderRef.current;
+    if (!mr || mr.state !== "paused") return;
+    mr.resume();
+    if (streamRef.current) startAnalyser(streamRef.current);
+    setState("recording");
+    timerRef.current = setInterval(() => setDurationSeconds((s) => s + 1), 1000);
+  }, [startAnalyser]);
+
+  const getPartialBlob = useCallback((): Blob | null => {
+    if (chunksRef.current.length === 0) return null;
+    const mimeType = mediaRecorderRef.current?.mimeType ?? "audio/webm";
+    return new Blob(chunksRef.current, { type: mimeType });
+  }, []);
+
   const stop = useCallback(() => {
     if (timerRef.current) {
       clearInterval(timerRef.current);
@@ -129,8 +162,9 @@ export function useRecorder(): UseRecorderResult {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      mediaRecorderRef.current.stop();
+    const mr = mediaRecorderRef.current;
+    if (mr && mr.state !== "inactive") {
+      mr.stop();
     }
   }, [stopAnalyser]);
 
@@ -140,6 +174,7 @@ export function useRecorder(): UseRecorderResult {
     setDurationSeconds(0);
     setLevelNormalized(0);
     setErrorMessage(null);
+    chunksRef.current = [];
     setState("idle");
   }, [stop]);
 
@@ -152,5 +187,17 @@ export function useRecorder(): UseRecorderResult {
     };
   }, [stopAnalyser]);
 
-  return { state, durationSeconds, levelNormalized, audioBlob, errorMessage, start, stop, reset };
+  return {
+    state,
+    durationSeconds,
+    levelNormalized,
+    audioBlob,
+    errorMessage,
+    start,
+    stop,
+    pause,
+    resume,
+    getPartialBlob,
+    reset,
+  };
 }

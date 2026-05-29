@@ -9,7 +9,9 @@ from ojas.config import settings
 from ojas.core.errors import register_exception_handlers
 from ojas.core.logging import configure_logging
 from ojas.db.session import engine
+from ojas.routes.ai import router as ai_router
 from ojas.routes.artifacts import router as artifacts_router
+from ojas.routes.consultations import router as consultations_router
 from ojas.routes.health import router as health_router
 from ojas.routes.patients import router as patients_router
 
@@ -50,7 +52,9 @@ def create_app() -> FastAPI:
     register_exception_handlers(app)
     app.include_router(health_router)
     app.include_router(patients_router)
+    app.include_router(consultations_router)
     app.include_router(artifacts_router)
+    app.include_router(ai_router)
 
     return app
 

@@ -3,5 +3,8 @@ from ojas.schemas.artifact import ArtifactPatch as ArtifactPatch
 from ojas.schemas.artifact import DownloadUrl as DownloadUrl
 from ojas.schemas.artifact import NoteCreate as NoteCreate
 from ojas.schemas.artifact import TranscribeResponse as TranscribeResponse
+from ojas.schemas.consultation import ConsultationCreate as ConsultationCreate
+from ojas.schemas.consultation import ConsultationOut as ConsultationOut
+from ojas.schemas.consultation import ConsultationPatch as ConsultationPatch
 from ojas.schemas.patient import PatientCreate as PatientCreate
 from ojas.schemas.patient import PatientOut as PatientOut

@@ -1,7 +1,7 @@
 import uuid
 
 import structlog
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ojas.core.deps import get_current_user
@@ -125,25 +125,55 @@ async def open_patient(
 @router.get("/{patient_id}/artifacts", response_model=list[ArtifactOut])
 async def list_artifacts(
     patient_id: uuid.UUID,
+    consultation_id: uuid.UUID | None = None,
+    q: str | None = None,
     session: AsyncSession = Depends(get_db),
     _user: User = Depends(get_current_user),
 ) -> list[ArtifactOut]:
-    from ojas.repositories.artifact_repository import ArtifactRepository
-    repo = ArtifactRepository(session)
-    artifacts = await repo.list_for_patient(patient_id)
-    return [ArtifactOut.model_validate(a) for a in artifacts]
+    from sqlalchemy import select, or_, func
+    from ojas.models.artifact import Artifact
+
+    query = select(Artifact).where(Artifact.patient_id == patient_id)
+    if consultation_id:
+        query = query.where(Artifact.consultation_id == consultation_id)
+    if q:
+        pattern = f"%{q.lower()}%"
+        query = query.where(
+            or_(
+                func.lower(Artifact.title).like(pattern),
+                func.lower(Artifact.text_content).like(pattern),
+            )
+        )
+    query = query.order_by(Artifact.created_at.desc())
+    result = await session.execute(query)
+    return [ArtifactOut.model_validate(a) for a in result.scalars().all()]
 
 
 @router.post("/{patient_id}/artifacts/upload", response_model=ArtifactOut, status_code=201)
 async def upload_artifact(
     patient_id: uuid.UUID,
     file: UploadFile = File(...),
+    consultation_id: str | None = Form(None),
     session: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
     storage: ObjectStorage = Depends(_get_storage),
+    background_tasks: BackgroundTasks = None,  # type: ignore[assignment]
 ) -> ArtifactOut:
     svc = await _artifact_svc(session, user, storage)
     artifact = await svc.upload_file(patient_id, file)
+    if consultation_id:
+        artifact.consultation_id = uuid.UUID(consultation_id)  # type: ignore[assignment]
+        await session.commit()
+        await session.refresh(artifact)
+
+    # Background AI labeling + OCR for images in parallel
+    if background_tasks:
+        background_tasks.add_task(
+            _label_file_background, artifact.id, artifact.title, artifact.mime_type or ""
+        )
+        if artifact.mime_type and artifact.mime_type.startswith("image/"):
+            background_tasks.add_task(_auto_ocr_background, artifact.id)
+
     return ArtifactOut.model_validate(artifact)
 
 
@@ -151,9 +181,12 @@ async def upload_artifact(
 async def create_note(
     patient_id: uuid.UUID,
     body: NoteCreate,
+    consultation_id: uuid.UUID | None = None,
+    parent_id: uuid.UUID | None = None,
     session: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
     storage: ObjectStorage = Depends(_get_storage),
+    background_tasks: BackgroundTasks = None,  # type: ignore[assignment]
 ) -> ArtifactOut:
     svc = ArtifactService(
         session=session,
@@ -161,7 +194,16 @@ async def create_note(
         clinic_id=user.clinic_id,
         storage=storage,
     )
-    artifact = await svc.create_note(patient_id, body.text)
+    artifact = await svc.create_note(patient_id, body.text, parent_id=parent_id)
+    if consultation_id:
+        artifact.consultation_id = consultation_id
+        await session.commit()
+        await session.refresh(artifact)
+
+    # Background AI labeling
+    if background_tasks:
+        background_tasks.add_task(_label_note_background, artifact.id, body.text)
+
     return ArtifactOut.model_validate(artifact)
 
 
@@ -170,16 +212,232 @@ async def save_audio(
     patient_id: uuid.UUID,
     audio: UploadFile = File(...),
     duration_seconds: float = Form(...),
+    consultation_id: str | None = Form(None),
+    parent_id: str | None = Form(None),
     session: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
     storage: ObjectStorage = Depends(_get_storage),
+    background_tasks: BackgroundTasks = None,  # type: ignore[assignment]
 ) -> ArtifactOut:
     svc = await _artifact_svc(session, user, storage)
     audio_bytes = await audio.read()
+    
+    parsed_parent_id = uuid.UUID(parent_id) if parent_id else None
+    
     artifact = await svc.save_audio_artifact(
         patient_id=patient_id,
         audio_bytes=audio_bytes,
         mime_type=audio.content_type or "audio/webm",
         duration_seconds=int(duration_seconds),
+        parent_id=parsed_parent_id,
     )
+    if consultation_id:
+        artifact.consultation_id = uuid.UUID(consultation_id)  # type: ignore[assignment]
+        await session.commit()
+        await session.refresh(artifact)
+
+    if background_tasks:
+        background_tasks.add_task(_process_audio_background, artifact.id)
+
     return ArtifactOut.model_validate(artifact)
+
+
+# ── Background labeling helpers ──────────────────────────────────────────────
+
+
+async def _label_note_background(artifact_id: uuid.UUID, text: str) -> None:
+    """AI-label a note artifact in the background."""
+    try:
+        from ojas.services.labeling_service import label_note
+        from ojas.db.session import async_session_factory
+        from ojas.repositories.artifact_repository import ArtifactRepository
+
+        title = await label_note(text)
+        async with async_session_factory() as session:
+            repo = ArtifactRepository(session)
+            artifact = await repo.get(artifact_id)
+            if artifact is not None:
+                artifact.title = title
+                await session.commit()
+                if artifact.consultation_id:
+                    from ojas.services.consolidation_service import consolidate_consultation
+                    await consolidate_consultation(session, artifact.consultation_id)
+        logger.info("label_note_bg_done", artifact_id=str(artifact_id), title=title)
+    except Exception as exc:
+        logger.warning("label_note_bg_failed", artifact_id=str(artifact_id), error=str(exc))
+
+
+async def _label_file_background(artifact_id: uuid.UUID, filename: str, mime_type: str) -> None:
+    """AI-label an uploaded file in the background. Also triggers OCR for images."""
+    try:
+        from ojas.services.labeling_service import label_file
+        from ojas.db.session import async_session_factory
+        from ojas.repositories.artifact_repository import ArtifactRepository
+
+        title, category = await label_file(filename, mime_type)
+        async with async_session_factory() as session:
+            repo = ArtifactRepository(session)
+            artifact = await repo.get(artifact_id)
+            if artifact is not None:
+                artifact.title = title
+                artifact.type = category
+                await session.commit()
+                if artifact.consultation_id:
+                    from ojas.services.consolidation_service import consolidate_consultation
+                    await consolidate_consultation(session, artifact.consultation_id)
+        logger.info(
+            "label_file_bg_done",
+            artifact_id=str(artifact_id),
+            title=title,
+            category=category,
+        )
+
+
+    except Exception as exc:
+        logger.warning("label_file_bg_failed", artifact_id=str(artifact_id), error=str(exc))
+
+
+async def _auto_ocr_background(artifact_id: uuid.UUID) -> None:
+    """Auto-OCR an image artifact in the background."""
+    try:
+        from ojas.db.session import async_session_factory
+        from ojas.repositories.artifact_repository import ArtifactRepository
+        from ojas.services.ocr_service import extract_text_from_image
+        from ojas.services.llm_service import structure_prescription
+        from ojas.storage.base import S3Storage
+
+        # Step 1: Quick read metadata from the database
+        storage_key = None
+        mime_type = None
+        title = None
+        async with async_session_factory() as session:
+            repo = ArtifactRepository(session)
+            artifact = await repo.get(artifact_id)
+            if artifact is None or not artifact.storage_key:
+                return
+            storage_key = artifact.storage_key
+            mime_type = artifact.mime_type or "image/jpeg"
+            title = artifact.title
+
+        # Step 2: Download and run AI processing outside of the database session
+        storage = S3Storage()
+        image_bytes = await storage.get(storage_key)
+        ocr_text = await extract_text_from_image(image_bytes, mime_type)
+
+        summary = None
+        new_title = None
+        new_category = None
+
+        if ocr_text.strip():
+            summary = await structure_prescription(ocr_text)
+            
+            # Re-label with OCR context
+            from ojas.services.labeling_service import label_file
+            new_title, new_category = await label_file(
+                title, mime_type, ocr_text
+            )
+
+        # Step 3: Quick write results to the database in a new transaction
+        async with async_session_factory() as session:
+            repo = ArtifactRepository(session)
+            artifact = await repo.get(artifact_id)
+            if artifact is not None:
+                if ocr_text.strip():
+                    artifact.prescription_ocr_text = ocr_text
+                    artifact.prescription_summary = summary
+                    if new_title and new_category:
+                        artifact.title = new_title
+                        artifact.type = new_category
+                else:
+                    artifact.prescription_ocr_text = ""
+                await session.commit()
+                if artifact.consultation_id:
+                    from ojas.services.consolidation_service import consolidate_consultation
+                    await consolidate_consultation(session, artifact.consultation_id)
+        logger.info("auto_ocr_bg_done", artifact_id=str(artifact_id))
+    except Exception as exc:
+        logger.warning("auto_ocr_bg_failed", artifact_id=str(artifact_id), error=str(exc))
+        try:
+            from ojas.db.session import async_session_factory
+            from ojas.repositories.artifact_repository import ArtifactRepository
+            async with async_session_factory() as session:
+                repo = ArtifactRepository(session)
+                artifact = await repo.get(artifact_id)
+                if artifact:
+                    artifact.prescription_ocr_text = ""
+                    await session.commit()
+        except Exception:
+            pass
+
+
+async def _process_audio_background(artifact_id: uuid.UUID) -> None:
+    """End-to-end background transcription, structuring, and labeling for audio."""
+    try:
+        from ojas.db.session import async_session_factory
+        from ojas.repositories.artifact_repository import ArtifactRepository
+        from ojas.services.stt_deepgram import transcribe_audio_deepgram
+        from ojas.services.llm_service import structure_transcript
+        from ojas.services.labeling_service import label_audio
+        from ojas.storage.base import S3Storage
+
+        storage = S3Storage()
+
+        # Step 1: Quick read metadata from the database
+        storage_key = None
+        mime_type = None
+        async with async_session_factory() as session:
+            repo = ArtifactRepository(session)
+            artifact = await repo.get(artifact_id)
+            if not artifact or not artifact.storage_key:
+                return
+            storage_key = artifact.storage_key
+            mime_type = artifact.mime_type or "audio/webm"
+
+        # Step 2: Download and transcribe outside of database session
+        audio_bytes = await storage.get(storage_key)
+        filename = storage_key.split("/")[-1]
+        transcript = await transcribe_audio_deepgram(
+            audio_bytes=audio_bytes,
+            content_type=mime_type,
+            filename=filename,
+        )
+
+        # Step 3: Quick write transcript to the database
+        async with async_session_factory() as session:
+            repo = ArtifactRepository(session)
+            artifact = await repo.get(artifact_id)
+            if artifact:
+                artifact.raw_transcript = transcript
+                artifact.text_content = transcript
+                await session.commit()
+
+        # Step 4: Structure clinical note outside of database session
+        note, tags = await structure_transcript(transcript)
+
+        # Step 5: Quick write structured note to the database
+        async with async_session_factory() as session:
+            repo = ArtifactRepository(session)
+            artifact = await repo.get(artifact_id)
+            if artifact:
+                artifact.structured_note = note
+                artifact.tags = tags
+                await session.commit()
+
+        # Step 6: Generate audio title outside of database session
+        title = await label_audio(transcript)
+
+        # Step 7: Quick write title to the database
+        async with async_session_factory() as session:
+            repo = ArtifactRepository(session)
+            artifact = await repo.get(artifact_id)
+            if artifact:
+                artifact.title = title
+                await session.commit()
+                if artifact.consultation_id:
+                    from ojas.services.consolidation_service import consolidate_consultation
+                    await consolidate_consultation(session, artifact.consultation_id)
+            
+        logger.info("process_audio_bg_done", artifact_id=str(artifact_id), title=title)
+    except Exception as exc:
+        logger.warning("process_audio_bg_failed", artifact_id=str(artifact_id), error=str(exc))
+

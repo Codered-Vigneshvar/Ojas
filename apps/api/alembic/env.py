@@ -1,9 +1,18 @@
 import asyncio
+import os
+import sys
 from logging.config import fileConfig
 
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
+
+# Ensure the src directory is in the sys.path
+src_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
+print("RESOLVED SRC PATH:", src_path)
+print("EXISTS:", os.path.exists(src_path))
+sys.path.insert(0, src_path)
+print("SYS.PATH:", sys.path)
 
 # Import all models so Alembic autogenerate can detect them
 import ojas.models  # noqa: F401

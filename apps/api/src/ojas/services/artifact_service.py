@@ -1,4 +1,5 @@
 import uuid
+from typing import Any
 
 from fastapi import UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -77,15 +78,17 @@ class ArtifactService:
             metadata={"artifact_type": artifact_type, "patient_id": str(patient_id)},
         )
         await self._session.commit()
+        await self._session.refresh(artifact)
         return artifact
 
-    async def create_note(self, patient_id: uuid.UUID, text: str) -> Artifact:
+    async def create_note(self, patient_id: uuid.UUID, text: str, parent_id: uuid.UUID | None = None) -> Artifact:
         lines = text.strip().splitlines()
         title = (lines[0][:200] if lines else "Note") or "Note"
         line_count = len(lines)
         summary = f"{line_count} line{'s' if line_count != 1 else ''}"
         artifact = await self._repo.create(
             patient_id=patient_id,
+            parent_id=parent_id,
             clinic_id=self._clinic_id,
             type="note",
             title=title,
@@ -101,6 +104,7 @@ class ArtifactService:
             metadata={"artifact_type": "note", "patient_id": str(patient_id)},
         )
         await self._session.commit()
+        await self._session.refresh(artifact)
         return artifact
 
     async def transcribe_audio(self, audio_bytes: bytes, mime_type: str) -> tuple[str, int]:
@@ -115,6 +119,7 @@ class ArtifactService:
         audio_bytes: bytes,
         mime_type: str,
         duration_seconds: int,
+        parent_id: uuid.UUID | None = None,
     ) -> Artifact:
         extension = ".mp4" if "mp4" in mime_type else ".webm"
         storage_key = f"patients/{patient_id}/audio/{uuid.uuid4()}{extension}"
@@ -124,6 +129,7 @@ class ArtifactService:
         duration_str = f"{mins} min" if mins > 0 else f"{secs}s"
         artifact = await self._repo.create(
             patient_id=patient_id,
+            parent_id=parent_id,
             clinic_id=self._clinic_id,
             type="audio",
             title="Consultation recording",
@@ -181,7 +187,7 @@ class ArtifactService:
             raise NotFoundError("Artifact not found or has no associated file")
         return await self._storage.presigned_url(artifact.storage_key, expires_in=900)
 
-    async def patch(self, artifact_id: uuid.UUID, **fields: str | None) -> Artifact:
+    async def patch(self, artifact_id: uuid.UUID, **fields: Any) -> Artifact:
         artifact = await self._repo.update(artifact_id, **fields)
         if artifact is None:
             raise NotFoundError("Artifact not found")
@@ -192,4 +198,6 @@ class ArtifactService:
             resource_type="artifact",
             resource_id=artifact_id,
         )
+        await self._session.commit()
+        await self._session.refresh(artifact)
         return artifact

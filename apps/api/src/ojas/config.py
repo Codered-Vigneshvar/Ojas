@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60 * 24
 
+    # AI services
+    openai_api_key: str = Field(default="")
+    deepgram_api_key: str = Field(default="")
+    openai_model: str = Field(default="gpt-4o")
+
     @property
     def is_dev(self) -> bool:
         return self.environment == "dev"
