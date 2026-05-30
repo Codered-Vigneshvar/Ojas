@@ -21,7 +21,7 @@ export default function BookAppointmentModal({ onClose, onSuccess, selectedDate,
     }
     return null;
   });
-  
+
   // New patient state
   const [isCreatingNew, setIsCreatingNew] = useState(false);
   const [newName, setNewName] = useState("");
@@ -31,18 +31,24 @@ export default function BookAppointmentModal({ onClose, onSuccess, selectedDate,
   const [apptDateStr, setApptDateStr] = useState(() => {
     if (editAppointment) {
       const d = new Date(editAppointment.scheduled_time);
-      return `${d.getFullYear()}-${(d.getMonth()+1).toString().padStart(2, '0')}-${d.getDate().toString().padStart(2, '0')}`;
+      return `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getDate().toString().padStart(2, '0')}`;
     }
     const d = selectedDate;
-    return `${d.getFullYear()}-${(d.getMonth()+1).toString().padStart(2, '0')}-${d.getDate().toString().padStart(2, '0')}`;
+    return `${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, '0')}-${d.getDate().toString().padStart(2, '0')}`;
   });
-  
+
   const [startHour, setStartHour] = useState(() => {
     if (editAppointment) return new Date(editAppointment.scheduled_time).getHours().toString();
-    return initialTimeStr.split(":")[0];
+    return parseInt(initialTimeStr.split(":")[0], 10).toString();
   });
   const [startMin, setStartMin] = useState(() => {
-    if (editAppointment) return new Date(editAppointment.scheduled_time).getMinutes().toString();
+    if (editAppointment) {
+      const mins = new Date(editAppointment.scheduled_time).getMinutes();
+      const closest = [0, 15, 30, 45].reduce((prev, curr) => 
+        Math.abs(curr - mins) < Math.abs(prev - mins) ? curr : prev
+      );
+      return closest.toString().padStart(2, '0');
+    }
     return initialTimeStr.split(":")[1];
   });
 
@@ -91,15 +97,15 @@ export default function BookAppointmentModal({ onClose, onSuccess, selectedDate,
 
     try {
       setIsSubmitting(true);
-      
+
       let targetPatientId = selectedPatient?.id;
-      
+
       if (isCreatingNew) {
         if (!newName.trim() || !newPhone.trim()) return;
         const newP = await createPatient(newName.trim(), newPhone.trim());
         targetPatientId = newP.id;
       }
-      
+
       if (!targetPatientId) return;
 
       // Construct Date object combining apptDateStr and timeStr
@@ -108,11 +114,17 @@ export default function BookAppointmentModal({ onClose, onSuccess, selectedDate,
       const totalMins = parseInt(durationHours) * 60 + parseInt(durationMins);
 
       if (editAppointment) {
-        await patchAppointment(editAppointment.id, {
+        const updatePayload: any = {
           scheduled_time: apptDate.toISOString(),
           duration_minutes: totalMins,
           notes: notes.trim() || undefined,
-        } as any); // Type cast since patchAppointment might not expect all these fields natively yet, or it does. Wait, lib/api.ts actually only defined `status`, `actual_arrival_time`, `notes` in `patchAppointment`'s signature! Let me just pass it anyway, backend usually accepts it if it's in the Pydantic schema.
+        };
+
+        if (editAppointment.status === "cancelled") {
+          updatePayload.status = "scheduled";
+        }
+
+        await patchAppointment(editAppointment.id, updatePayload);
       } else {
         await createAppointment({
           patient_id: targetPatientId,
@@ -123,9 +135,15 @@ export default function BookAppointmentModal({ onClose, onSuccess, selectedDate,
       }
 
       onSuccess();
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert("Failed to save appointment");
+      let msg = err.message || "Unknown error";
+      if (Array.isArray(err.response?.data?.detail)) {
+        msg = err.response.data.detail.map((d: any) => d.msg).join(", ");
+      } else if (typeof err.response?.data?.detail === "string") {
+        msg = err.response.data.detail;
+      }
+      alert(`Failed to save appointment: ${msg}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -267,15 +285,15 @@ export default function BookAppointmentModal({ onClose, onSuccess, selectedDate,
                   <div className="space-y-1.5">
                     <label className="block text-sm font-medium text-neutral-700">Date</label>
                     <div className="relative">
-                    <input
-                      type="date"
-                      required
-                      value={apptDateStr}
-                      onChange={(e) => setApptDateStr(e.target.value)}
-                      className="w-full px-3 py-2.5 text-sm border border-neutral-200 rounded-xl focus:outline-none focus:border-teal-500 transition-colors bg-white text-neutral-700 font-mono accent-teal-600"
-                    />
+                      <input
+                        type="date"
+                        required
+                        value={apptDateStr}
+                        onChange={(e) => setApptDateStr(e.target.value)}
+                        className="w-full px-3 py-2.5 text-sm border border-neutral-200 rounded-xl focus:outline-none focus:border-teal-500 transition-colors bg-white text-neutral-700 font-mono accent-teal-600"
+                      />
+                    </div>
                   </div>
-                </div>
                   <div className="space-y-1.5">
                     <label className="block text-sm font-medium text-neutral-700">Start Time</label>
                     <div className="flex items-center gap-2">

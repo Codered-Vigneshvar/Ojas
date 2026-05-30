@@ -23,7 +23,13 @@ export default function EditPatientModal({ patient, onClose }: Props) {
       onClose();
     },
     onError: (err: any) => {
-      alert(err.response?.data?.detail || "Failed to update patient");
+      let msg = err.message || "Failed to update patient";
+      if (Array.isArray(err.response?.data?.detail)) {
+        msg = err.response.data.detail.map((d: any) => d.msg).join(", ");
+      } else if (typeof err.response?.data?.detail === "string") {
+        msg = err.response.data.detail;
+      }
+      alert(`Failed to update patient: ${msg}`);
     },
   });
 

@@ -47,4 +47,5 @@ __pycache__/
 # Models
 *.gguf
 models/
+!apps/api/src/ojas/models/
 

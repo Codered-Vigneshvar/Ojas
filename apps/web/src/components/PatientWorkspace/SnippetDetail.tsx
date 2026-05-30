@@ -13,19 +13,11 @@ interface Props {
   onAddChildAudio?: () => void;
 }
 
-const NOTE_FIELDS: { key: keyof StructuredNote; label: string; multiline?: boolean }[] = [
-  { key: "chief_complaint", label: "Chief Complaint" },
-  { key: "clinical_findings", label: "Clinical Findings", multiline: true },
-  { key: "diagnosis", label: "Diagnosis" },
-  { key: "treatment_plan", label: "Treatment Plan", multiline: true },
-  { key: "medications_prescribed", label: "Medications Prescribed", multiline: true },
-  { key: "follow_up_instructions", label: "Follow-up Instructions" },
-];
+
 
 export default function SnippetDetail({ snippet, onClose, onUpdate, childArtifacts = [], onAddChildNote, onAddChildAudio }: Props) {
   const [editedNote, setEditedNote] = useState<Partial<StructuredNote>>({});
   const [editedTitle, setEditedTitle] = useState<string | null>(null);
-  const [editedTextContent, setEditedTextContent] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -83,17 +75,35 @@ export default function SnippetDetail({ snippet, onClose, onUpdate, childArtifac
   useEffect(() => {
     setEditedNote({});
     setEditedTitle(null);
-    setEditedTextContent(null);
     setIsSaved(false);
   }, [snippet.id]);
 
   const displayNote = snippet.structured_note ? { ...snippet.structured_note, ...editedNote } : null;
-  const isDirty = Object.keys(editedNote).length > 0 || editedTitle !== null || editedTextContent !== null;
+  const isDirty = Object.keys(editedNote).length > 0 || editedTitle !== null;
 
-  const handleFieldChange = useCallback((key: keyof StructuredNote, value: string) => {
-    setEditedNote((prev) => ({ ...prev, [key]: value || null }));
+  const handleHeadingChange = useCallback((index: number, value: string) => {
+    setEditedNote((prev) => {
+      const baseSections = prev.sections || snippet.structured_note?.sections || [];
+      const sections = [...baseSections];
+      if (sections[index]) {
+        sections[index] = { ...sections[index], heading: value };
+      }
+      return { ...prev, sections };
+    });
     setIsSaved(false);
-  }, []);
+  }, [snippet.structured_note]);
+
+  const handlePointsChange = useCallback((index: number, value: string) => {
+    setEditedNote((prev) => {
+      const baseSections = prev.sections || snippet.structured_note?.sections || [];
+      const sections = [...baseSections];
+      if (sections[index]) {
+        sections[index] = { ...sections[index], points: value.split("\n") };
+      }
+      return { ...prev, sections };
+    });
+    setIsSaved(false);
+  }, [snippet.structured_note]);
 
   const handleSave = async () => {
     if (!isDirty) return;
@@ -101,10 +111,6 @@ export default function SnippetDetail({ snippet, onClose, onUpdate, childArtifac
     try {
       const payload: any = {};
       if (editedTitle !== null) payload.title = editedTitle;
-      if (editedTextContent !== null) {
-        payload.text_content = editedTextContent;
-        payload.raw_transcript = editedTextContent;
-      }
       if (Object.keys(editedNote).length > 0) {
         payload.structured_note = editedNote;
       }
@@ -211,6 +217,54 @@ export default function SnippetDetail({ snippet, onClose, onUpdate, childArtifac
               />
             </div>
           )}
+          
+          {/* Audio Processing State */}
+          {snippet.type === "audio" && (!snippet.structured_note || (snippet.structured_note as any).error) && snippet.raw_transcript !== "" && (
+            Date.now() - new Date(snippet.created_at).getTime() < 120000 && !(snippet.structured_note as any)?.error ? (
+               <div className="bg-indigo-50/50 p-4 rounded-xl border border-indigo-100 flex items-start gap-3 animate-pulse mt-4">
+                  <div className="p-2 bg-indigo-100 rounded-lg text-indigo-600 mt-0.5">
+                    <Loader2 size={18} className="animate-spin" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-indigo-900">Analyzing Recording...</h3>
+                    <p className="text-sm text-indigo-700 mt-1 leading-relaxed">
+                      Our AI is securely processing your consultation to generate a structured clinical note. This usually takes a few moments.
+                    </p>
+                  </div>
+               </div>
+            ) : (
+               <div className="bg-red-50/50 p-4 rounded-xl border border-red-100 flex items-start gap-3 mt-4">
+                  <div className="p-2 bg-red-100 rounded-lg text-red-600 mt-0.5">
+                    <Loader2 size={18} className="rotate-45 text-red-400 opacity-50" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-red-900">
+                      {(snippet.structured_note as any)?.error ? "AI Provider Rate Limit Exceeded" : "Processing timed out"}
+                    </h3>
+                    <p className="text-sm text-red-800 mt-1 leading-relaxed">
+                      {(snippet.structured_note as any)?.error 
+                        ? "You have made too many back-to-back requests. Gemini's free tier has temporarily paused your access. Please wait a minute and try again."
+                        : "The audio was saved, but the AI was unable to transcribe or structure it within the expected time limit."}
+                    </p>
+                  </div>
+               </div>
+            )
+          )}
+
+          {/* Audio Empty Transcript State */}
+          {snippet.type === "audio" && snippet.raw_transcript === "" && (
+             <div className="bg-amber-50/50 p-4 rounded-xl border border-amber-200 flex items-start gap-3 mt-4">
+                <div className="p-2 bg-amber-100 rounded-lg text-amber-600 mt-0.5">
+                  <Mic size={18} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-amber-900">No Speech Detected</h3>
+                  <p className="text-sm text-amber-800 mt-1 leading-relaxed">
+                    We couldn't detect any spoken words in this recording. Please make sure your microphone is picking up sound and try recording again.
+                  </p>
+                </div>
+             </div>
+          )}
 
           {/* Document Preview (For Image/Prescription files) */}
           {snippet.storage_key && fileUrl && (snippet.type === "image" || snippet.type === "prescription" || snippet.mime_type?.startsWith("image/")) && (
@@ -239,11 +293,10 @@ export default function SnippetDetail({ snippet, onClose, onUpdate, childArtifac
 
 
 
-          {/* Editable Note content for note type */}
-          {snippet.type === "note" && (
-            <div className="space-y-5">
-              {/* Snippet Title / Label */}
-              <div className="space-y-1.5">
+          {/* Snippet Title / Label */}
+          <div className="space-y-1.5">
+            {snippet.type === "note" && (
+              <>
                 <label className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wide block ml-1">
                   Snippet Label / Title
                 </label>
@@ -255,34 +308,20 @@ export default function SnippetDetail({ snippet, onClose, onUpdate, childArtifac
                     setIsSaved(false);
                   }}
                   placeholder="Note Title"
-                  className="w-full text-sm text-neutral-800 bg-white border border-neutral-200 rounded-xl px-4 py-3 focus:outline-none focus:border-neutral-400 focus:ring-4 focus:ring-neutral-100 transition-all shadow-sm hover:shadow"
+                  className="w-full text-sm text-neutral-800 bg-white border border-neutral-200 rounded-xl px-4 py-3 focus:outline-none focus:border-neutral-400 focus:ring-4 focus:ring-neutral-100 transition-all shadow-sm hover:shadow mb-4"
                 />
-              </div>
+              </>
+            )}
+          </div>
 
-              {/* Note Content */}
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wide block ml-1">
-                  Note Content
-                </label>
-                <textarea
-                  value={editedTextContent !== null ? editedTextContent : (snippet.text_content || "")}
-                  onChange={(e) => {
-                    setEditedTextContent(e.target.value);
-                    setIsSaved(false);
-                  }}
-                  rows={12}
-                  placeholder="Type note content here..."
-                  className="w-full text-sm leading-relaxed text-neutral-800 bg-white border border-neutral-200 rounded-xl px-4 py-3 focus:outline-none focus:border-neutral-400 focus:ring-4 focus:ring-neutral-100 resize-y transition-all shadow-sm font-sans"
-                />
-              </div>
-            </div>
-          )}
-
-          {snippet.raw_transcript && (
+          {/* Original Text / Transcript (Read-only) */}
+          {(snippet.raw_transcript || (snippet.type === "note" && snippet.text_content)) && (
             <div>
-              <h3 className="text-sm font-semibold text-neutral-800 mb-3">Raw Transcript</h3>
+              <h3 className="text-sm font-semibold text-neutral-800 mb-3">
+                {snippet.type === "note" ? "Original Note Text" : "Raw Transcript"}
+              </h3>
               <div className="p-4 bg-neutral-50 border border-neutral-100 rounded-xl text-sm leading-relaxed text-neutral-600 whitespace-pre-wrap font-mono">
-                {snippet.raw_transcript}
+                {snippet.raw_transcript || snippet.text_content}
               </div>
             </div>
           )}
@@ -307,33 +346,30 @@ export default function SnippetDetail({ snippet, onClose, onUpdate, childArtifac
               </div>
 
               <div className="space-y-4">
-                {NOTE_FIELDS.map(({ key, label, multiline }) => {
-                  const val = (displayNote[key] as string | null) ?? "";
-                  return (
-                    <div key={key}>
-                      <label className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wide block mb-1.5 ml-1">
-                        {label}
-                      </label>
-                      {multiline ? (
-                        <textarea
-                          value={val}
-                          onChange={(e) => handleFieldChange(key, e.target.value)}
-                          rows={3}
-                          placeholder="—"
-                          className="w-full text-sm text-neutral-800 bg-white border border-neutral-200 rounded-xl px-4 py-3 focus:outline-none focus:border-neutral-400 focus:ring-4 focus:ring-neutral-100 resize-none leading-relaxed transition-all shadow-sm hover:shadow"
-                        />
-                      ) : (
-                        <input
-                          type="text"
-                          value={val}
-                          onChange={(e) => handleFieldChange(key, e.target.value)}
-                          placeholder="—"
-                          className="w-full text-sm text-neutral-800 bg-white border border-neutral-200 rounded-xl px-4 py-3 focus:outline-none focus:border-neutral-400 focus:ring-4 focus:ring-neutral-100 transition-all shadow-sm hover:shadow"
-                        />
-                      )}
+                {(displayNote.sections || []).length > 0 ? (
+                  (displayNote.sections || []).map((section: any, idx: number) => (
+                    <div key={idx} className="space-y-1.5">
+                      <input
+                        type="text"
+                        value={section.heading}
+                        onChange={(e) => handleHeadingChange(idx, e.target.value)}
+                        className="text-[11px] font-semibold text-neutral-500 uppercase tracking-wide block ml-1 bg-transparent border-none focus:outline-none focus:ring-0 w-full p-0"
+                        placeholder="Section Heading"
+                      />
+                      <textarea
+                        value={(section.points || []).join("\n")}
+                        onChange={(e) => handlePointsChange(idx, e.target.value)}
+                        rows={Math.max(2, (section.points || []).length)}
+                        placeholder="—"
+                        className="w-full text-sm text-neutral-800 bg-white border border-neutral-200 rounded-xl px-4 py-3 focus:outline-none focus:border-neutral-400 focus:ring-4 focus:ring-neutral-100 resize-none leading-relaxed transition-all shadow-sm hover:shadow"
+                      />
                     </div>
-                  );
-                })}
+                  ))
+                ) : (
+                  <div className="text-sm text-neutral-500 italic px-1">
+                    No clinical information was detected in this recording.
+                  </div>
+                )}
 
                 {/* Save button moved to the header to prevent bottom action bar overlap */}
               </div>
@@ -600,15 +636,14 @@ export default function SnippetDetail({ snippet, onClose, onUpdate, childArtifac
             </div>
           )}
 
-          {/* AI Processing State */}
-          {((snippet.type === "audio" && !snippet.structured_note) || 
-            (snippet.mime_type?.startsWith("image/") && snippet.prescription_ocr_text === null)) && (
+          {/* Image/Document AI Processing State */}
+          {snippet.type !== "audio" && snippet.mime_type?.startsWith("image/") && snippet.prescription_ocr_text === null && (
             Date.now() - new Date(snippet.created_at).getTime() < 120000 ? (
               <div className="p-8 mt-4 text-center bg-indigo-50/50 rounded-2xl border border-indigo-100 flex flex-col items-center gap-4">
                 <div className="flex flex-col items-center gap-2">
                   <Loader2 size={24} className="animate-spin text-indigo-500" />
                   <p className="text-sm font-medium text-indigo-700">
-                    {snippet.type === "audio" ? "AI is analyzing and structuring this audio..." : "AI is extracting and analyzing this document..."}
+                    AI is extracting and analyzing this document...
                   </p>
                 </div>
                 <p className="text-xs text-indigo-500/80 max-w-sm">
@@ -686,9 +721,7 @@ export default function SnippetDetail({ snippet, onClose, onUpdate, childArtifac
                                 await patchArtifact(child.id, {
                                   text_content: editingChildText,
                                   raw_transcript: editingChildText,
-                                  structured_note: child.type === "audio" && child.structured_note 
-                                    ? { ...child.structured_note, clinical_findings: editingChildText } 
-                                    : undefined
+                                  structured_note: child.structured_note
                                 });
                                 setEditingChildId(null);
                                 onUpdate();
@@ -703,7 +736,7 @@ export default function SnippetDetail({ snippet, onClose, onUpdate, childArtifac
                         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2 group-hover:bg-neutral-50/50 -mx-2 px-2 py-1 rounded transition-colors">
                           <div className="text-sm text-neutral-800 leading-relaxed whitespace-pre-wrap flex-1 pt-0.5">
                             {child.type === "audio" 
-                              ? (child.structured_note?.clinical_findings || child.structured_note?.chief_complaint || child.raw_transcript || (
+                              ? (child.structured_note?.sections?.[0]?.points?.join(" ") || child.raw_transcript || (
                                   <span className="flex items-center gap-1.5 text-xs text-indigo-600">
                                     <Loader2 size={12} className="animate-spin" /> AI is processing audio...
                                   </span>
@@ -718,7 +751,7 @@ export default function SnippetDetail({ snippet, onClose, onUpdate, childArtifac
                                 setEditingChildId(child.id);
                                 setEditingChildText(
                                   child.type === "audio" 
-                                    ? (child.structured_note?.clinical_findings || child.structured_note?.chief_complaint || child.raw_transcript || "")
+                                    ? (child.structured_note?.sections?.[0]?.points?.join(" ") || child.raw_transcript || "")
                                     : (child.text_content || "")
                                 );
                               }}

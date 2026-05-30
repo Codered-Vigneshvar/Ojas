@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Upload, Mic, StickyNote } from "lucide-react";
@@ -27,7 +27,7 @@ import SnippetDetail from "@/components/PatientWorkspace/SnippetDetail";
 import ConsultationHistory from "@/components/PatientWorkspace/ConsultationHistory";
 import ConsultationScribe from "@/components/PatientWorkspace/ConsultationScribe";
 import BookAppointmentModal from "@/components/Dashboard/BookAppointmentModal";
-import type { Consultation, Appointment } from "@/types";
+import type { Consultation, Appointment, Artifact } from "@/types";
 
 type Modal = "note" | "record" | "upload" | null;
 
@@ -43,6 +43,7 @@ export default function PatientPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeParentIdForModal, setActiveParentIdForModal] = useState<string | null>(null);
   const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
+  const tempAudioIdRef = useRef<string | null>(null);
 
   const { data: patient, isLoading: patientLoading } = useQuery({
     queryKey: ["patient", patientId],
@@ -61,10 +62,11 @@ export default function PatientPage() {
     queryFn: () => listArtifacts(patientId!, activeConsultation?.id, searchQuery),
     enabled: !!patientId && !!activeConsultation,
     refetchInterval: (query) => {
-      // Poll every 2 seconds if audio lacks a structured note, or if files still have extensions in title (being labeled/OCRed in background)
+      // Poll every 2 seconds if audio lacks a structured note, if notes lack a structured note, or if files still have extensions in title (being labeled/OCRed in background)
       const data = query.state?.data as any[] | undefined;
       const needsPolling = data?.some(a =>
         (a.type === "audio" && !a.structured_note) ||
+        (a.type === "note" && !a.structured_note) ||
         (a.title && a.title.includes(".") && (a.type === "file" || a.type === "image" || a.type === "prescription" || a.type === "report")) ||
         (a.mime_type?.startsWith("image/") && a.prescription_ocr_text === null)
       );
@@ -197,15 +199,24 @@ export default function PatientPage() {
   });
 
   const audioMutation = useMutation({
-    mutationFn: ({ blob, duration, parentId }: { blob: Blob; duration: number; parentId?: string }) =>
+    mutationFn: ({ blob, duration, parentId, tempId: _tempId }: { blob: Blob; duration: number; parentId?: string; tempId?: string }) =>
       saveAudioArtifact(patientId!, blob, duration, activeConsultation?.id, parentId),
-    onSuccess: (data) => {
-      invalidateData();
-      setActiveModal(null);
-      setActiveParentIdForModal(null);
-      if (data?.id && !activeParentIdForModal) {
+    onError: (_err, vars) => {
+      if (activeSnippetId === vars.tempId) {
+        setActiveSnippetId(null);
+      }
+    },
+    onSuccess: (data, vars) => {
+      const qk = ["artifacts", patientId, activeConsultation?.id, searchQuery];
+      qc.setQueryData<Artifact[]>(qk, (old) => {
+        if (!old) return [data];
+        return old.map(a => a.id === vars.tempId ? data : a);
+      });
+      
+      if (activeSnippetId === vars.tempId && !vars.parentId) {
         setActiveSnippetId(data.id);
       }
+      invalidateData();
     },
   });
 
@@ -471,8 +482,45 @@ export default function PatientPage() {
             setActiveModal(null);
             setActiveParentIdForModal(null);
           }}
+          onStopInitiated={(duration) => {
+            const parent = activeParentIdForModal || undefined;
+            const tempId = "optimistic-" + Date.now();
+            tempAudioIdRef.current = tempId;
+            
+            const optimisticArtifact: Artifact = {
+              id: tempId,
+              patient_id: patientId!,
+              type: "audio",
+              title: "Consultation recording",
+              summary: "Processing audio...",
+              mime_type: "audio/webm",
+              size_bytes: 0,
+              duration_seconds: duration,
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+              storage_key: "temp",
+              text_content: null,
+              raw_transcript: null,
+              structured_note: null,
+              tags: [],
+              prescription_ocr_text: null,
+              prescription_summary: null,
+              doctor_confirmed_at: null,
+              consultation_id: activeConsultation?.id || null,
+              parent_id: parent || null
+            };
+            const qk = ["artifacts", patientId, activeConsultation?.id, searchQuery];
+            qc.setQueryData<Artifact[]>(qk, (old) => {
+              return old ? [optimisticArtifact, ...old] : [optimisticArtifact];
+            });
+            if (!parent) setActiveSnippetId(tempId);
+          }}
           onSave={async (blob, duration) => {
-            return await audioMutation.mutateAsync({ blob, duration, parentId: activeParentIdForModal || undefined });
+            const parent = activeParentIdForModal || undefined;
+            setActiveModal(null);
+            setActiveParentIdForModal(null);
+            audioMutation.mutate({ blob, duration, parentId: parent, tempId: tempAudioIdRef.current || undefined });
+            return {} as Artifact;
           }}
         />
       )}

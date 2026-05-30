@@ -18,14 +18,14 @@ from ojas.schemas.artifact import (
     DownloadUrl,
 )
 from ojas.services.artifact_service import ArtifactService
-from ojas.storage.base import ObjectStorage, S3Storage
+from ojas.storage.base import ObjectStorage, get_storage
 from fastapi import BackgroundTasks
 
 router = APIRouter(tags=["artifacts"])
 
 
 def _get_storage() -> ObjectStorage:
-    return S3Storage()
+    return get_storage()
 
 
 
@@ -36,7 +36,7 @@ async def _make_svc(
         session=session,
         actor_id=user.id,
         clinic_id=user.clinic_id,
-        storage=storage or S3Storage(),
+        storage=storage or get_storage(),
     )
 
 

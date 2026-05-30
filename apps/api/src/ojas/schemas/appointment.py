@@ -30,4 +30,6 @@ class AppointmentPatch(BaseModel):
     status: str | None = None
     actual_arrival_time: datetime | None = None
     consultation_id: uuid.UUID | None = None
+    scheduled_time: datetime | None = None
+    duration_minutes: int | None = None
     notes: str | None = None

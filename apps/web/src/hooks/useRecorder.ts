@@ -90,20 +90,10 @@ export function useRecorder(): UseRecorderResult {
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
 
-      mr.onstop = async () => {
+      mr.onstop = () => {
         const blob = new Blob(chunksRef.current, { type: mimeType });
         setAudioBlob(blob);
-
-        try {
-          const arrayBuffer = await blob.arrayBuffer();
-          const audioCtx = new AudioContext();
-          const decoded = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
-          setDurationSeconds(decoded.duration);
-          audioCtx.close();
-        } catch (err) {
-          console.error("Failed to decode audio duration:", err);
-        }
-
+        // Duration is tracked by the live timer — no need for slow decodeAudioData.
         setState("stopping");
       };
 

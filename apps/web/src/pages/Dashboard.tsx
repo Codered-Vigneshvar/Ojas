@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Search, CalendarPlus, Mic, StickyNote, Activity } from "lucide-react";
-import { listAppointments, startConsultation, deleteAppointment, patchAppointment, deleteConsultation } from "@/lib/api";
+import { listAppointments, startConsultation, deleteAppointment, patchAppointment } from "@/lib/api";
 import { greeting } from "@/lib/time";
 import type { Appointment } from "@/types";
 
@@ -98,6 +98,24 @@ export default function Dashboard() {
         alert("Failed to delete appointment");
       }
     }
+  };
+
+  const handleCancelAppointment = async (appt: Appointment) => {
+    if (confirm(`Are you sure you want to cancel the appointment for ${appt.patient_name}? The record will be kept but marked as cancelled.`)) {
+      try {
+        await patchAppointment(appt.id, { status: "cancelled" });
+        qc.invalidateQueries({ queryKey: ["appointments"] });
+      } catch (e) {
+        console.error(e);
+        alert("Failed to cancel appointment");
+      }
+    }
+  };
+
+  const handleRescheduleAppointment = (appt: Appointment) => {
+    setBookDate(new Date(appt.scheduled_time));
+    setEditAppt(appt);
+    setShowBookModal(true);
   };
 
   return (
@@ -216,6 +234,8 @@ export default function Dashboard() {
                       onFinishConsultation={handleFinishConsultation}
                       onCancelConsultation={handleCancelConsultation}
                       onDeleteAppointment={handleDeleteAppointment}
+                      onCancelAppointment={handleCancelAppointment}
+                      onRescheduleAppointment={handleRescheduleAppointment}
                     />
                   </div>
                 ))}

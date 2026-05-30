@@ -14,14 +14,14 @@ from ojas.schemas.artifact import (
 from ojas.schemas.patient import PatientCreate, PatientOut, PatientUpdate
 from ojas.services.artifact_service import ArtifactService
 from ojas.services.patient_service import PatientService
-from ojas.storage.base import ObjectStorage, S3Storage
+from ojas.storage.base import ObjectStorage, get_storage
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/patients", tags=["patients"])
 
 
 def _get_storage() -> ObjectStorage:
-    return S3Storage()
+    return get_storage()
 
 
 
@@ -351,22 +351,30 @@ async def _auto_ocr_background(artifact_id: uuid.UUID) -> None:
             title = artifact.title
 
         # Step 2: Download and run AI processing outside of the database session
-        storage = S3Storage()
+        from ojas.storage.base import get_storage
+        storage = get_storage()
         image_bytes = await storage.get(storage_key)
-        ocr_text = await extract_text_from_image(image_bytes, mime_type)
+        
+        ocr_text = ""
+        try:
+            ocr_text = await extract_text_from_image(image_bytes, mime_type)
+        except Exception as e:
+            logger.error("extract_text_from_image_failed", error=str(e), artifact_id=str(artifact_id))
 
         summary = None
         new_title = None
         new_category = None
 
         if ocr_text.strip():
-            summary = await structure_prescription(ocr_text)
-            
-            # Re-label with OCR context
-            from ojas.services.labeling_service import label_file
-            new_title, new_category = await label_file(
-                title, mime_type, ocr_text
-            )
+            try:
+                summary = await structure_prescription(ocr_text)
+                # Re-label with OCR context
+                from ojas.services.labeling_service import label_file
+                new_title, new_category = await label_file(
+                    title, mime_type, ocr_text
+                )
+            except Exception as e:
+                logger.error("structure_prescription_failed", error=str(e), artifact_id=str(artifact_id))
 
         # Step 3: Quick write results to the database in a new transaction
         async with async_session_factory() as session:
@@ -406,12 +414,12 @@ async def _process_audio_background(artifact_id: uuid.UUID) -> None:
     try:
         from ojas.db.session import async_session_factory
         from ojas.repositories.artifact_repository import ArtifactRepository
-        from ojas.services.stt_deepgram import transcribe_audio_deepgram
         from ojas.services.llm_service import structure_transcript
         from ojas.services.labeling_service import label_audio
         from ojas.storage.base import S3Storage
 
-        storage = S3Storage()
+        from ojas.storage.base import get_storage
+        storage = get_storage()
 
         # Step 1: Quick read metadata from the database
         storage_key = None
@@ -427,11 +435,11 @@ async def _process_audio_background(artifact_id: uuid.UUID) -> None:
         # Step 2: Download and transcribe outside of database session
         audio_bytes = await storage.get(storage_key)
         filename = storage_key.split("/")[-1]
-        transcript = await transcribe_audio_deepgram(
-            audio_bytes=audio_bytes,
-            content_type=mime_type,
-            filename=filename,
-        )
+        
+        from ojas.stt import get_stt_client
+        stt_client = get_stt_client()
+        stt_res = await stt_client.transcribe(audio_bytes)
+        transcript = stt_res.text
 
         # Step 3: Quick write transcript to the database
         async with async_session_factory() as session:
@@ -441,6 +449,10 @@ async def _process_audio_background(artifact_id: uuid.UUID) -> None:
                 artifact.raw_transcript = transcript
                 artifact.text_content = transcript
                 await session.commit()
+
+        if not transcript.strip():
+            logger.info("process_audio_bg_done_empty_speech", artifact_id=str(artifact_id))
+            return
 
         # Step 4: Structure clinical note outside of database session
         note, tags = await structure_transcript(transcript)
@@ -471,4 +483,15 @@ async def _process_audio_background(artifact_id: uuid.UUID) -> None:
         logger.info("process_audio_bg_done", artifact_id=str(artifact_id), title=title)
     except Exception as exc:
         logger.warning("process_audio_bg_failed", artifact_id=str(artifact_id), error=str(exc))
+        try:
+            from ojas.db.session import async_session_factory
+            from ojas.repositories.artifact_repository import ArtifactRepository
+            async with async_session_factory() as session:
+                repo = ArtifactRepository(session)
+                artifact = await repo.get(artifact_id)
+                if artifact:
+                    artifact.structured_note = {"error": "processing_failed", "details": str(exc)}
+                    await session.commit()
+        except Exception:
+            pass
 

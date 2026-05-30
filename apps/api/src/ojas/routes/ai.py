@@ -34,7 +34,7 @@ from ojas.services.llm_service import (
 )
 from ojas.services.ocr_service import extract_text_from_image
 from ojas.services.stt_deepgram import transcribe_audio_deepgram
-from ojas.storage.base import S3Storage
+from ojas.storage.base import get_storage
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/ai", tags=["ai"])
@@ -127,7 +127,7 @@ async def transcribe_artifact(
     if not artifact.storage_key:
         raise ValidationError("Artifact has no audio file in storage")
 
-    storage = S3Storage()
+    storage = get_storage()
     audio_bytes = await storage.get(artifact.storage_key)
 
     transcript = await transcribe_audio_deepgram(
@@ -215,7 +215,7 @@ async def ocr_prescription(
     if not artifact.storage_key:
         raise ValidationError("Artifact has no image file in storage")
 
-    storage = S3Storage()
+    storage = get_storage()
     image_bytes = await storage.get(artifact.storage_key)
     mime_type = artifact.mime_type or "image/jpeg"
 

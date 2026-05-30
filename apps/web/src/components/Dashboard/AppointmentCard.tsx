@@ -1,4 +1,4 @@
-import { Clock, CheckCircle2, Video, ArrowRight, Activity, Calendar } from "lucide-react";
+import { Clock, CheckCircle2, Video, ArrowRight, Activity, Calendar, XCircle } from "lucide-react";
 import type { Appointment } from "@/types";
 
 interface Props {
@@ -8,9 +8,20 @@ interface Props {
   onFinishConsultation?: (appointment: Appointment) => void;
   onCancelConsultation?: (appointment: Appointment) => void;
   onDeleteAppointment?: (appointment: Appointment) => void;
+  onCancelAppointment?: (appointment: Appointment) => void;
+  onRescheduleAppointment?: (appointment: Appointment) => void;
 }
 
-export default function AppointmentCard({ appointment, onViewConsultation, onStartConsultation, onFinishConsultation, onCancelConsultation, onDeleteAppointment }: Props) {
+export default function AppointmentCard({ 
+  appointment, 
+  onViewConsultation, 
+  onStartConsultation, 
+  onFinishConsultation, 
+  onCancelConsultation, 
+  onDeleteAppointment,
+  onCancelAppointment,
+  onRescheduleAppointment
+}: Props) {
   const scheduledDate = new Date(appointment.scheduled_time);
   
   const formattedTime = scheduledDate.toLocaleTimeString(undefined, { 
@@ -44,6 +55,11 @@ export default function AppointmentCard({ appointment, onViewConsultation, onSta
       containerStyles = "bg-neutral-50/50 border-neutral-100 opacity-80 hover:opacity-100";
       badgeStyles = "bg-neutral-100 text-neutral-500 border-neutral-200";
       icon = <CheckCircle2 size={14} />;
+      break;
+    case "cancelled":
+      containerStyles = "bg-red-50/20 border-red-100 opacity-70 hover:opacity-100 shadow-xs";
+      badgeStyles = "bg-red-50 text-red-700 border-red-150";
+      icon = <XCircle size={14} />;
       break;
     case "in_consultation":
     case "arrived":
@@ -122,20 +138,31 @@ export default function AppointmentCard({ appointment, onViewConsultation, onSta
             </>
           ) : (
             <>
-              <button
-                onClick={() => onStartConsultation(appointment)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-teal-600 rounded-lg hover:bg-teal-700 active:scale-95 transition-all shadow-sm"
-              >
-                <Video size={14} />
-                Start Consultation
-              </button>
-              
-              {appointment.consultation_id && (
+              {appointment.status !== "cancelled" && (
                 <button
-                  onClick={() => onViewConsultation(appointment.patient_id, appointment.consultation_id!)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-neutral-500 hover:text-neutral-700 transition-colors"
+                  onClick={() => onStartConsultation(appointment)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-teal-600 rounded-lg hover:bg-teal-700 active:scale-95 transition-all shadow-sm"
                 >
-                  View Notes
+                  <Video size={14} />
+                  Start Consultation
+                </button>
+              )}
+              
+              {onRescheduleAppointment && (
+                <button
+                  onClick={() => onRescheduleAppointment(appointment)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-neutral-600 bg-white border border-neutral-200 rounded-lg hover:bg-neutral-50 transition-colors"
+                >
+                  Reschedule
+                </button>
+              )}
+              
+              {appointment.status !== "cancelled" && onCancelAppointment && (
+                <button
+                  onClick={() => onCancelAppointment(appointment)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-neutral-600 bg-white border border-neutral-200 rounded-lg hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-all"
+                >
+                  Cancel
                 </button>
               )}
               

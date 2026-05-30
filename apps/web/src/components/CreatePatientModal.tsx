@@ -32,7 +32,12 @@ export default function CreatePatientModal({ onClose }: Props) {
       navigate(`/p/${patient.id}`);
     },
     onError: (err: AxiosError<ApiError>) => {
-      const detail = err.response?.data?.detail ?? "Something went wrong";
+      let detail = "Something went wrong";
+      if (Array.isArray(err.response?.data?.detail)) {
+        detail = err.response.data.detail.map((d: any) => d.msg).join(", ");
+      } else if (typeof err.response?.data?.detail === "string") {
+        detail = err.response.data.detail;
+      }
       setFieldError(detail);
     },
   });

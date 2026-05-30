@@ -6,47 +6,39 @@ the source text. Medical accuracy requires returning null over guessing.
 
 from __future__ import annotations
 
+from datetime import datetime
 import json
 import structlog
 from openai import AsyncOpenAI
 
 from ojas.config import settings
 from ojas.utils.json_helper import clean_json
+from ojas.utils.llm_client import generate_chat_completion
 
 logger = structlog.get_logger(__name__)
-
-_client: AsyncOpenAI | None = None
-
-
-def _get_client() -> AsyncOpenAI:
-    global _client
-    if _client is None:
-        if settings.gemini_api_key:
-            _client = AsyncOpenAI(
-                api_key=settings.gemini_api_key,
-                base_url=settings.gemini_base_url,
-            )
-        else:
-            _client = AsyncOpenAI(api_key=settings.openai_api_key)
-    return _client
 
 
 _TRANSCRIPT_SYSTEM = """\
 You are a clinical note assistant for a medical/dental clinic.
 Given a raw consultation transcript (may be in any language or a mix of languages), \
-extract and return ONLY a JSON object with these exact keys:
+intelligently extract and structure the information into a list of logical sections \
+based on the conversation. Return ONLY a JSON object with these exact keys:
 
 {
-  "chief_complaint": "string or null",
-  "clinical_findings": "string or null",
-  "diagnosis": "string or null",
-  "treatment_plan": "string or null",
-  "medications_prescribed": "string or null",
-  "follow_up_instructions": "string or null",
+  "sections": [
+    {
+      "heading": "String (e.g. 'Chief Complaint', 'Vitals', 'Clinical Findings', 'Treatment Plan', etc.)",
+      "points": ["String bullet point", "String bullet point"]
+    }
+  ],
   "tags": ["3 to 5 short topic tags"]
 }
 
 CRITICAL RULES:
+- Create as many sections as necessary to accurately capture the consultation.
+- Use professional medical terminology for the headings (e.g., 'Chief Complaint', 'Diagnosis', 'Treatment Plan').
+- IMPORTANT: If any information is mentioned that falls outside standard clinical structure (e.g., financial concerns, parent preferences, appointment scheduling), CREATE a dynamic, custom section heading for it (e.g., 'Patient Preferences', 'Scheduling Notes', 'Financial Considerations').
+- Do NOT discard any spoken information just because it doesn't fit a traditional medical category.
 - NEVER generate, infer, or assume a medical diagnosis. Only extract a diagnosis if it was explicitly and literally stated by the doctor in the transcript. If not explicitly stated, return null.
 - Extract ONLY information explicitly stated in the transcript.
 - Do NOT infer, assume, or add any details not spoken aloud.
@@ -128,17 +120,42 @@ async def structure_transcript(raw_transcript: str) -> tuple[dict[str, object], 
     returned separately so the caller can store them in the artifact.tags column.
     """
     logger.info("llm_structure_transcript_start", chars=len(raw_transcript))
-    client = _get_client()
-    response = await client.chat.completions.create(
-        model=settings.gemini_model_flash if settings.gemini_api_key else settings.openai_model,
-        max_tokens=1024,
-        response_format={"type": "json_object"},
+    
+    if not raw_transcript.strip():
+        return {}, []
+    
+    if not settings.openai_api_key and not settings.gemini_api_key:
+        logger.info("llm_structure_transcript_stub_mode_active")
+        mock_note = {
+            "sections": [
+                {
+                    "heading": "Chief Complaint",
+                    "points": ["Patient presents with symptoms mentioned in the raw transcript."]
+                },
+                {
+                    "heading": "Clinical Findings",
+                    "points": [f"Observed findings based on transcription: \"{raw_transcript[:100]}...\""]
+                },
+                {
+                    "heading": "Treatment Plan",
+                    "points": [
+                        "Supportive care and monitoring.",
+                        "To be customized by attending physician."
+                    ]
+                }
+            ]
+        }
+        mock_tags = ["General", "Consultation", "AI-Stub"]
+        return mock_note, mock_tags
+
+    raw = await generate_chat_completion(
         messages=[
             {"role": "system", "content": _TRANSCRIPT_SYSTEM},
             {"role": "user", "content": f"Transcript:\n{raw_transcript}"},
         ],
+        max_tokens=1024,
+        response_format={"type": "json_object"},
     )
-    raw = response.choices[0].message.content or "{}"
     result: dict[str, object] = json.loads(clean_json(raw))
     tags: list[str] = result.pop("tags", [])  # type: ignore[assignment]
     logger.info("llm_structure_transcript_done", tags=tags)
@@ -148,17 +165,49 @@ async def structure_transcript(raw_transcript: str) -> tuple[dict[str, object], 
 async def structure_prescription(ocr_text: str) -> dict[str, object]:
     """Structure prescription OCR text into a medications list dict."""
     logger.info("llm_structure_prescription_start", chars=len(ocr_text))
-    client = _get_client()
-    response = await client.chat.completions.create(
-        model=settings.gemini_model_flash if settings.gemini_api_key else settings.openai_model,
-        max_tokens=1024,
-        response_format={"type": "json_object"},
+    
+    if not settings.openai_api_key and not settings.gemini_api_key:
+        logger.info("llm_structure_prescription_stub_mode_active")
+        return {
+            "document_type": "prescription",
+            "patient_metadata": {
+                "name": "Dr Sreekanth's Patient",
+                "age": "35",
+                "gender": "Male",
+                "patient_id": None,
+                "report_id": None,
+                "date": datetime.now().strftime("%Y-%m-%d"),
+                "referred_by": None
+            },
+            "medications": [
+                {
+                    "name": "Amoxicillin 500mg (Stub)",
+                    "dose": "1 capsule",
+                    "frequency": "Three times daily",
+                    "duration": "7 days"
+                },
+                {
+                    "name": "Paracetamol 650mg (Stub)",
+                    "dose": "1 tablet",
+                    "frequency": "As needed for fever",
+                    "duration": "3 days"
+                }
+              ],
+              "lab_results": [],
+              "special_instructions": "Take medications after food.",
+              "interpretation_notes": "Prescription successfully structured under local AI Stub mode.",
+              "reference_tables": [],
+              "diagnosis_mentioned": "Acute upper respiratory tract infection (Stub)"
+        }
+
+    raw = await generate_chat_completion(
         messages=[
             {"role": "system", "content": _PRESCRIPTION_SYSTEM},
-            {"role": "user", "content": f"Prescription OCR text:\n{ocr_text}"},
+            {"role": "user", "content": f"OCR Text:\n{ocr_text}"},
         ],
+        max_tokens=1024,
+        response_format={"type": "json_object"},
     )
-    raw = response.choices[0].message.content or "{}"
     result: dict[str, object] = json.loads(clean_json(raw))
     logger.info("llm_structure_prescription_done")
     return result
@@ -174,21 +223,28 @@ async def apply_voice_correction(
     All other fields are returned unchanged.
     """
     logger.info("llm_voice_correction_start", chars=len(correction_transcript))
-    client = _get_client()
+    
+    if not settings.openai_api_key and not settings.gemini_api_key:
+        logger.info("llm_voice_correction_stub_mode_active")
+        updated_note = dict(current_note)
+        sections = updated_note.get("sections", [])
+        if sections and isinstance(sections, list):
+            sections[-1]["points"].append(f"Correction applied: {correction_transcript}")
+        return updated_note
+
     user_content = (
         f"Current note:\n{json.dumps(current_note, indent=2)}\n\n"
         f"Doctor's correction:\n\"{correction_transcript}\""
     )
-    response = await client.chat.completions.create(
-        model=settings.gemini_model_flash if settings.gemini_api_key else settings.openai_model,
-        max_tokens=1024,
-        response_format={"type": "json_object"},
+    raw = await generate_chat_completion(
         messages=[
             {"role": "system", "content": _VOICE_CORRECTION_SYSTEM},
             {"role": "user", "content": user_content},
         ],
+        max_tokens=2048,
+        response_format={"type": "json_object"},
+        is_pro=True
     )
-    raw = response.choices[0].message.content or "{}"
     result: dict[str, object] = json.loads(clean_json(raw))
     logger.info("llm_voice_correction_done")
     return result

@@ -12,22 +12,9 @@ from ojas.config import settings
 from ojas.models.artifact import Artifact
 from ojas.models.consultation import Consultation
 from ojas.models.patient import Patient
+from ojas.utils.llm_client import generate_chat_completion
 
 logger = structlog.get_logger(__name__)
-
-_client: AsyncOpenAI | None = None
-
-def _get_client() -> AsyncOpenAI:
-    global _client
-    if _client is None:
-        if settings.gemini_api_key:
-            _client = AsyncOpenAI(
-                api_key=settings.gemini_api_key,
-                base_url=settings.gemini_base_url,
-            )
-        else:
-            _client = AsyncOpenAI(api_key=settings.openai_api_key)
-    return _client
 
 _CONSOLIDATION_SYSTEM = """\
 You are a clinical scribe AI. Given a consultation manifest with a patient name and timeline of snippets, produce a structured clinical overview.
@@ -116,11 +103,7 @@ async def consolidate_consultation(session: AsyncSession, consultation_id: uuid.
     for artifact in artifacts:
         summary_str = "No summary available."
         
-        if artifact.text_content:
-            summary_str = artifact.text_content[:4000] + "..." if len(artifact.text_content) > 4000 else artifact.text_content
-        elif artifact.type == "audio" and artifact.raw_transcript:
-            summary_str = artifact.raw_transcript[:4000] + "..." if len(artifact.raw_transcript) > 4000 else artifact.raw_transcript
-        elif artifact.structured_note:
+        if artifact.structured_note:
             # Drop null values to save tokens
             note_data = {k: v for k, v in artifact.structured_note.items() if v}
             if note_data:
@@ -129,6 +112,10 @@ async def consolidate_consultation(session: AsyncSession, consultation_id: uuid.
             presc_data = {k: v for k, v in artifact.prescription_summary.items() if v}
             if presc_data:
                 summary_str = json.dumps(presc_data)
+        elif artifact.type == "audio" and artifact.raw_transcript:
+            summary_str = artifact.raw_transcript[:4000] + "..." if len(artifact.raw_transcript) > 4000 else artifact.raw_transcript
+        elif artifact.text_content:
+            summary_str = artifact.text_content[:4000] + "..." if len(artifact.text_content) > 4000 else artifact.text_content
         elif artifact.summary:
             summary_str = artifact.summary
         
@@ -155,20 +142,18 @@ async def consolidate_consultation(session: AsyncSession, consultation_id: uuid.
         return
 
     # 4. Single LLM Call (use primary model for speed and intelligence)
-    client = _get_client()
     try:
-        response = await client.chat.completions.create(
-            model=settings.gemini_model_pro if settings.gemini_api_key else settings.openai_model,
-            response_format={"type": "json_object"},
+        raw = await generate_chat_completion(
             messages=[
                 {"role": "system", "content": _CONSOLIDATION_SYSTEM},
                 {"role": "user", "content": f"Manifest:\n{json.dumps(manifest, indent=2)}"}
             ],
-            temperature=0.0,
             max_tokens=4000,
+            response_format={"type": "json_object"},
+            is_pro=True
         )
         
-        result_json = response.choices[0].message.content
+        result_json = raw
         if result_json:
             # Strip markdown formatting if present
             clean_json = result_json.strip()
@@ -187,8 +172,16 @@ async def consolidate_consultation(session: AsyncSession, consultation_id: uuid.
             
             await session.commit()
             logger.info(f"Successfully consolidated consultation {consultation_id}")
+    except openai.RateLimitError as e:
+        logger.warning(f"Rate limit exceeded during consolidation: {e}")
+        consultation.summary_text = "### ⚠️ AI Provider Rate Limit Exceeded\nYou have made too many back-to-back requests. The primary AI provider has temporarily paused your access. Please wait a minute before making a new recording."
+        consultation.clinical_manifest = manifest
+        await session.commit()
     except Exception as e:
         logger.exception(f"Failed to consolidate consultation {consultation_id}: {e}")
+        consultation.summary_text = "### ⚠️ Consolidation Failed\nAn error occurred while generating the summary."
+        consultation.clinical_manifest = manifest
+        await session.commit()
 
 
 async def ask_consultation(
@@ -206,8 +199,6 @@ async def ask_consultation(
     if not manifest:
         return "This information is not available in the current consultation."
         
-    client = _get_client()
-    
     messages = [
         {"role": "system", "content": _ASK_SYSTEM},
         {"role": "system", "content": f"Manifest:\n{json.dumps(manifest, indent=2)}"}
@@ -220,14 +211,15 @@ async def ask_consultation(
     messages.append({"role": "user", "content": question})
     
     try:
-        response = await client.chat.completions.create(
-            model=settings.gemini_model_pro if settings.gemini_api_key else settings.openai_model, # Use the primary model for maximum intelligence on Q&A
+        answer = await generate_chat_completion(
             messages=messages,
-            temperature=0.0,
+            max_tokens=2000,
+            is_pro=True
         )
-        
-        answer = response.choices[0].message.content or "Sorry, I couldn't generate an answer."
         return answer
+    except openai.RateLimitError as e:
+        logger.warning(f"Rate limit exceeded during QA: {e}")
+        return "AI Provider Rate Limit Exceeded. Please try again later."
     except Exception as e:
         logger.exception(f"Failed to answer question for consultation {consultation_id}: {e}")
         # Re-raise so the endpoint can handle CancelledError properly

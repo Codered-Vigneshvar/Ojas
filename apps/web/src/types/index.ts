@@ -10,13 +10,13 @@ export interface Patient {
 
 export type ArtifactType = "report" | "image" | "file" | "note" | "audio" | "prescription";
 
+export interface DynamicSection {
+  heading: string;
+  points: string[];
+}
+
 export interface StructuredNote {
-  chief_complaint: string | null;
-  clinical_findings: string | null;
-  diagnosis: string | null;
-  treatment_plan: string | null;
-  medications_prescribed: string | null;
-  follow_up_instructions: string | null;
+  sections: DynamicSection[];
 }
 
 export interface Medication {
@@ -104,7 +104,7 @@ export interface Artifact {
 
 export type TimeBucket = "Today" | "This week" | "This month" | "Earlier";
 
-export type AppointmentStatus = "scheduled" | "arrived" | "in_consultation" | "completed";
+export type AppointmentStatus = "scheduled" | "arrived" | "in_consultation" | "completed" | "cancelled";
 
 export interface Appointment {
   id: string;

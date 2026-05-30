@@ -11,23 +11,9 @@ from openai import AsyncOpenAI
 
 from ojas.config import settings
 from ojas.utils.json_helper import clean_json
+from ojas.utils.llm_client import generate_chat_completion
 
 logger = structlog.get_logger(__name__)
-
-_client: AsyncOpenAI | None = None
-
-
-def _get_client() -> AsyncOpenAI:
-    global _client
-    if _client is None:
-        if settings.gemini_api_key:
-            _client = AsyncOpenAI(
-                api_key=settings.gemini_api_key,
-                base_url=settings.gemini_base_url,
-            )
-        else:
-            _client = AsyncOpenAI(api_key=settings.openai_api_key)
-    return _client
 
 
 _AUDIO_LABEL_SYSTEM = """\
@@ -61,25 +47,22 @@ Classification rules:
 Return ONLY a JSON object: {"title": "...", "category": "..."} — no explanation, no markdown."""
 
 
-async def label_audio(transcript: str) -> str:
-    """Generate a short descriptive title for an audio recording based on its transcript."""
-    if not transcript.strip():
-        return "Consultation Recording"
-
-    logger.info("label_audio_start", chars=len(transcript))
-    client = _get_client()
-    # Use just the first 500 chars of transcript for speed
-    snippet = transcript[:500]
-    response = await client.chat.completions.create(
-        model=settings.gemini_model_flash if settings.gemini_api_key else "gpt-4o-mini",
-        max_tokens=100,
-        response_format={"type": "json_object"},
+async def label_audio(raw_transcript: str) -> str:
+    """Generate a title for an audio consultation."""
+    logger.info("label_audio_start", chars=len(raw_transcript))
+    
+    if not settings.openai_api_key and not settings.gemini_api_key:
+        return "Audio Consultation"
+        
+    snippet = raw_transcript[:500]
+    raw = await generate_chat_completion(
         messages=[
             {"role": "system", "content": _AUDIO_LABEL_SYSTEM},
             {"role": "user", "content": f"Transcript:\n{snippet}"},
         ],
+        max_tokens=100,
+        response_format={"type": "json_object"},
     )
-    raw = response.choices[0].message.content or "{}"
     result = json.loads(clean_json(raw))
     title = result.get("title", "Consultation Recording")[:60]
     logger.info("label_audio_done", title=title)
@@ -92,18 +75,15 @@ async def label_note(text: str) -> str:
         return "Note"
 
     logger.info("label_note_start", chars=len(text))
-    client = _get_client()
     snippet = text[:500]
-    response = await client.chat.completions.create(
-        model=settings.gemini_model_flash if settings.gemini_api_key else "gpt-4o-mini",
-        max_tokens=100,
-        response_format={"type": "json_object"},
+    raw = await generate_chat_completion(
         messages=[
             {"role": "system", "content": _NOTE_LABEL_SYSTEM},
             {"role": "user", "content": f"Note:\n{snippet}"},
         ],
+        max_tokens=100,
+        response_format={"type": "json_object"},
     )
-    raw = response.choices[0].message.content or "{}"
     result = json.loads(clean_json(raw))
     title = result.get("title", "Note")[:60]
     logger.info("label_note_done", title=title)
@@ -116,21 +96,15 @@ async def label_file(filename: str, mime_type: str, ocr_text: str | None = None)
     Returns (title, category) where category is one of: image, prescription, report, file.
     """
     logger.info("label_file_start", filename=filename, mime_type=mime_type)
-    client = _get_client()
-    content = f"Filename: {filename}\nMIME type: {mime_type}"
-    if ocr_text:
-        content += f"\n\nExtracted text (first 500 chars):\n{ocr_text[:500]}"
-
-    response = await client.chat.completions.create(
-        model=settings.gemini_model_flash if settings.gemini_api_key else "gpt-4o-mini",
-        max_tokens=100,
-        response_format={"type": "json_object"},
+    snippet = ocr_text[:500] if ocr_text else ""
+    raw = await generate_chat_completion(
         messages=[
             {"role": "system", "content": _FILE_LABEL_SYSTEM},
-            {"role": "user", "content": content},
+            {"role": "user", "content": f"Filename: {filename}\nMIME: {mime_type}\nExtracted Text:\n{snippet}"},
         ],
+        max_tokens=100,
+        response_format={"type": "json_object"},
     )
-    raw = response.choices[0].message.content or "{}"
     result = json.loads(clean_json(raw))
     title = result.get("title", filename)[:60]
     category = result.get("category", "file")

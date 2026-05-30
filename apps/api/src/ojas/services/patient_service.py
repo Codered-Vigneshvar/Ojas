@@ -26,7 +26,7 @@ class PatientService:
         try:
             parsed = phonenumbers.parse(raw, "IN")
             if not phonenumbers.is_valid_number(parsed):
-                raise ValidationError("Invalid phone number")
+                raise ValidationError("Invalid phone number — please ensure it is exactly 10 digits or includes the correct country code")
             return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
         except NumberParseException as err:
             raise ValidationError(

@@ -23,7 +23,7 @@ class PatientCreate(BaseModel):
         try:
             parsed = phonenumbers.parse(v, "IN")
             if not phonenumbers.is_valid_number(parsed):
-                raise ValueError("Invalid phone number")
+                raise ValueError("Invalid phone number — please ensure it is exactly 10 digits or includes the correct country code")
             return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
         except NumberParseException as err:
             raise ValueError(

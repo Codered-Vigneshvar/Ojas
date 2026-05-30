@@ -56,6 +56,12 @@ class Settings(BaseSettings):
     gemini_model_flash: str = Field(default="gemini-2.5-flash")
     gemini_model_pro: str = Field(default="gemini-2.5-flash")
 
+    # Groq settings
+    groq_api_key: str = Field(default="")
+    groq_base_url: str = Field(default="https://api.groq.com/openai/v1")
+    groq_model: str = Field(default="llama-3.3-70b-versatile")
+    groq_vision_model: str = Field(default="llama-3.2-90b-vision-preview")
+
 
     @property
     def is_dev(self) -> bool:
