@@ -16,7 +16,13 @@ _client: AsyncOpenAI | None = None
 def _get_client() -> AsyncOpenAI:
     global _client
     if _client is None:
-        _client = AsyncOpenAI(api_key=settings.openai_api_key)
+        if settings.gemini_api_key:
+            _client = AsyncOpenAI(
+                api_key=settings.gemini_api_key,
+                base_url=settings.gemini_base_url,
+            )
+        else:
+            _client = AsyncOpenAI(api_key=settings.openai_api_key)
     return _client
 
 
@@ -31,7 +37,7 @@ async def extract_text_from_image(image_bytes: bytes, mime_type: str = "image/jp
 
     client = _get_client()
     response = await client.chat.completions.create(
-        model=settings.openai_model,
+        model=settings.gemini_model_flash if settings.gemini_api_key else settings.openai_model,
         max_tokens=1024,
         messages=[
             {

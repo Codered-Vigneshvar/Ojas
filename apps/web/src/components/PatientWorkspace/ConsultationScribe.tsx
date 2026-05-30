@@ -1,9 +1,8 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Sparkles, MessageSquare, Loader2, Send, Trash2, StopCircle, Pencil, Mic, MicOff, X, Check, Plus } from "lucide-react";
+import { Sparkles, MessageSquare, Loader2, Send, Trash2, StopCircle, Pencil, Mic, X, Check, Plus } from "lucide-react";
 import { getConsultationSummary, askConsultation, getConsultationMessages, deleteConsultationMessage, transcribeAudioBytes } from "@/lib/api";
 import { useRecorder } from "@/hooks/useRecorder";
-import type { ChatMessage } from "@/types";
 
 const AudioWaveform = ({ level }: { level: number }) => {
   const bars = 20;
@@ -263,7 +262,7 @@ export default function ConsultationScribe({
       qc.invalidateQueries({ queryKey: ["consultationMessages", consultationId] });
       abortControllerRef.current = null;
     },
-    onError: (err: any, question, context: any) => {
+    onError: (err: any, _question, context: any) => {
       if (context?.previousMessages) {
         qc.setQueryData(["consultationMessages", consultationId], context.previousMessages);
       }

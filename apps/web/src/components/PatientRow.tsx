@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { Phone, Clock, ChevronRight } from "lucide-react";
+import { Phone, Clock, ChevronRight, Pencil, Trash2 } from "lucide-react";
 import type { Patient } from "@/types";
 import { avatarColor, avatarInitials } from "@/lib/avatar";
 import { formatPhone } from "@/lib/phone";
@@ -9,9 +9,11 @@ import { useQueryClient } from "@tanstack/react-query";
 
 interface Props {
   patient: Patient;
+  onEdit: (patient: Patient) => void;
+  onDelete: (patient: Patient) => void;
 }
 
-export default function PatientRow({ patient }: Props) {
+export default function PatientRow({ patient, onEdit, onDelete }: Props) {
   const navigate = useNavigate();
   const qc = useQueryClient();
 
@@ -57,15 +59,39 @@ export default function PatientRow({ patient }: Props) {
       </div>
 
       {/* last accessed */}
-      <div className="hidden sm:flex items-center gap-1.5 text-xs text-neutral-400 font-mono min-w-0 flex-shrink-0 w-28 justify-end">
+      <div className="hidden sm:flex items-center gap-1.5 text-xs text-neutral-400 font-mono min-w-0 flex-shrink-0 w-28 justify-end mr-2">
         <Clock size={12} className="flex-shrink-0" />
         <span>{timeAgo(patient.last_accessed_at)}</span>
+      </div>
+
+      {/* actions */}
+      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit(patient);
+          }}
+          className="p-1.5 text-neutral-400 hover:text-teal-600 hover:bg-teal-50 rounded-md transition-colors"
+          title="Edit patient"
+        >
+          <Pencil size={14} />
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete(patient);
+          }}
+          className="p-1.5 text-neutral-400 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors"
+          title="Delete patient"
+        >
+          <Trash2 size={14} />
+        </button>
       </div>
 
       {/* chevron */}
       <ChevronRight
         size={16}
-        className="flex-shrink-0 text-neutral-300 group-hover:text-neutral-500 group-hover:translate-x-0.5 transition-all"
+        className="flex-shrink-0 text-neutral-300 group-hover:text-neutral-500 group-hover:translate-x-0.5 transition-all ml-1"
       />
     </button>
   );

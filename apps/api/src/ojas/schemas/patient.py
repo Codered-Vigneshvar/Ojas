@@ -38,6 +38,11 @@ class PatientOut(BaseModel):
     phone_e164: str
     last_accessed_at: datetime
     created_at: datetime
-    artifact_count: int = 0
+    artifact_count: int | None = None
 
     model_config = {"from_attributes": True}
+
+
+class PatientUpdate(BaseModel):
+    name: str | None = None
+    phone: str | None = None

@@ -14,6 +14,7 @@ from ojas.routes.artifacts import router as artifacts_router
 from ojas.routes.consultations import router as consultations_router
 from ojas.routes.health import router as health_router
 from ojas.routes.patients import router as patients_router
+from ojas.routes.appointments import router as appointments_router
 
 configure_logging()
 logger = structlog.get_logger(__name__)
@@ -53,6 +54,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(patients_router)
     app.include_router(consultations_router)
+    app.include_router(appointments_router)
     app.include_router(artifacts_router)
     app.include_router(ai_router)
 

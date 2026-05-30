@@ -53,7 +53,6 @@ class PatientService:
         patient = await self._repo.get(patient_id)
         if not patient:
             raise NotFoundError("Patient not found")
-        await self._repo.touch_last_accessed(patient_id)
         count = await self._artifact_repo.count_for_patient(patient_id)
         await audit_log(
             session=self._session,
@@ -75,3 +74,49 @@ class PatientService:
 
     async def search(self, query: str) -> list[Patient]:
         return await self._repo.search(self._clinic_id, query)
+
+    async def update_patient(
+        self, patient_id: uuid.UUID, name: str | None = None, phone_raw: str | None = None
+    ) -> Patient:
+        patient = await self._repo.get(patient_id)
+        if not patient or patient.clinic_id != self._clinic_id:
+            raise NotFoundError("Patient not found")
+
+        phone_e164 = None
+        if phone_raw is not None:
+            phone_e164 = self.normalize_phone(phone_raw)
+
+        updated_patient = await self._repo.update(
+            patient_id=patient_id,
+            name=name if name is not None else None,
+            phone_e164=phone_e164
+        )
+        
+        if not updated_patient:
+            raise NotFoundError("Patient not found")
+
+        await audit_log(
+            session=self._session,
+            actor_id=self._actor_id,
+            action="patient.update",
+            resource_type="patient",
+            resource_id=patient.id,
+        )
+        return updated_patient
+
+    async def delete_patient(self, patient_id: uuid.UUID) -> None:
+        patient = await self._repo.get(patient_id)
+        if not patient or patient.clinic_id != self._clinic_id:
+            raise NotFoundError("Patient not found")
+
+        success = await self._repo.delete(patient_id)
+        if not success:
+            raise NotFoundError("Patient not found")
+
+        await audit_log(
+            session=self._session,
+            actor_id=self._actor_id,
+            action="patient.delete",
+            resource_type="patient",
+            resource_id=patient_id,
+        )

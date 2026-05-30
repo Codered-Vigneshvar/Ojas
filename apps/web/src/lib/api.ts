@@ -1,5 +1,5 @@
 import axios, { AxiosError } from "axios";
-import type { Artifact, Patient, StructuredNote, PrescriptionSummary, Consultation } from "@/types";
+import type { Artifact, Patient, StructuredNote, PrescriptionSummary, Consultation, Appointment, AppointmentStatus, ChatMessage } from "@/types";
 
 export interface ApiError {
   detail: string;
@@ -31,6 +31,15 @@ export async function createPatient(name: string, phone: string): Promise<Patien
   return data;
 }
 
+export async function updatePatient(id: string, payload: { name?: string; phone?: string }): Promise<Patient> {
+  const { data } = await api.patch<Patient>(`/patients/${id}`, payload);
+  return data;
+}
+
+export async function deletePatient(id: string): Promise<void> {
+  await api.delete(`/patients/${id}`);
+}
+
 export async function listPatients(q?: string): Promise<Patient[]> {
   const { data } = await api.get<Patient[]>("/patients", { params: q ? { q } : {} });
   return data;
@@ -44,6 +53,37 @@ export async function getPatient(id: string): Promise<Patient> {
 export async function openPatient(id: string): Promise<Patient> {
   const { data } = await api.post<Patient>(`/patients/${id}/open`);
   return data;
+}
+
+// ── Appointments ──────────────────────────────────────────────────────────────
+
+export async function listAppointments(date?: string): Promise<Appointment[]> {
+  const { data } = await api.get<Appointment[]>("/appointments", { params: date ? { date } : {} });
+  return data;
+}
+
+export async function listTodayAppointments(): Promise<Appointment[]> {
+  const { data } = await api.get<Appointment[]>("/appointments/today");
+  return data;
+}
+
+export async function createAppointment(payload: { patient_id: string, scheduled_time: string, duration_minutes?: number, notes?: string }): Promise<Appointment> {
+  const { data } = await api.post<Appointment>("/appointments", payload);
+  return data;
+}
+
+export async function startConsultation(appointmentId: string): Promise<{ appointment: Appointment, consultation_id: string }> {
+  const { data } = await api.post<{ appointment: Appointment, consultation_id: string }>(`/appointments/${appointmentId}/start`);
+  return data;
+}
+
+export async function patchAppointment(appointmentId: string, payload: { status?: AppointmentStatus, actual_arrival_time?: string | null, notes?: string, consultation_id?: string | null }): Promise<Appointment> {
+  const { data } = await api.patch<Appointment>(`/appointments/${appointmentId}`, payload);
+  return data;
+}
+
+export async function deleteAppointment(appointmentId: string): Promise<void> {
+  await api.delete(`/appointments/${appointmentId}`);
 }
 
 // ── Consultations ─────────────────────────────────────────────────────────────

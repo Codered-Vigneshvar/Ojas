@@ -10,6 +10,7 @@ import structlog
 from openai import AsyncOpenAI
 
 from ojas.config import settings
+from ojas.utils.json_helper import clean_json
 
 logger = structlog.get_logger(__name__)
 
@@ -19,7 +20,13 @@ _client: AsyncOpenAI | None = None
 def _get_client() -> AsyncOpenAI:
     global _client
     if _client is None:
-        _client = AsyncOpenAI(api_key=settings.openai_api_key)
+        if settings.gemini_api_key:
+            _client = AsyncOpenAI(
+                api_key=settings.gemini_api_key,
+                base_url=settings.gemini_base_url,
+            )
+        else:
+            _client = AsyncOpenAI(api_key=settings.openai_api_key)
     return _client
 
 
@@ -64,7 +71,7 @@ async def label_audio(transcript: str) -> str:
     # Use just the first 500 chars of transcript for speed
     snippet = transcript[:500]
     response = await client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=settings.gemini_model_flash if settings.gemini_api_key else "gpt-4o-mini",
         max_tokens=100,
         response_format={"type": "json_object"},
         messages=[
@@ -72,7 +79,8 @@ async def label_audio(transcript: str) -> str:
             {"role": "user", "content": f"Transcript:\n{snippet}"},
         ],
     )
-    result = json.loads(response.choices[0].message.content or '{"title": "Consultation Recording"}')
+    raw = response.choices[0].message.content or "{}"
+    result = json.loads(clean_json(raw))
     title = result.get("title", "Consultation Recording")[:60]
     logger.info("label_audio_done", title=title)
     return title
@@ -87,7 +95,7 @@ async def label_note(text: str) -> str:
     client = _get_client()
     snippet = text[:500]
     response = await client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=settings.gemini_model_flash if settings.gemini_api_key else "gpt-4o-mini",
         max_tokens=100,
         response_format={"type": "json_object"},
         messages=[
@@ -95,7 +103,8 @@ async def label_note(text: str) -> str:
             {"role": "user", "content": f"Note:\n{snippet}"},
         ],
     )
-    result = json.loads(response.choices[0].message.content or '{"title": "Note"}')
+    raw = response.choices[0].message.content or "{}"
+    result = json.loads(clean_json(raw))
     title = result.get("title", "Note")[:60]
     logger.info("label_note_done", title=title)
     return title
@@ -113,7 +122,7 @@ async def label_file(filename: str, mime_type: str, ocr_text: str | None = None)
         content += f"\n\nExtracted text (first 500 chars):\n{ocr_text[:500]}"
 
     response = await client.chat.completions.create(
-        model="gpt-4o-mini",
+        model=settings.gemini_model_flash if settings.gemini_api_key else "gpt-4o-mini",
         max_tokens=100,
         response_format={"type": "json_object"},
         messages=[
@@ -121,9 +130,8 @@ async def label_file(filename: str, mime_type: str, ocr_text: str | None = None)
             {"role": "user", "content": content},
         ],
     )
-    result = json.loads(
-        response.choices[0].message.content or '{"title": "' + filename + '", "category": "file"}'
-    )
+    raw = response.choices[0].message.content or "{}"
+    result = json.loads(clean_json(raw))
     title = result.get("title", filename)[:60]
     category = result.get("category", "file")
     if category not in ("image", "prescription", "report", "file"):

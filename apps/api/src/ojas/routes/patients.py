@@ -11,7 +11,7 @@ from ojas.schemas.artifact import (
     ArtifactOut,
     NoteCreate,
 )
-from ojas.schemas.patient import PatientCreate, PatientOut
+from ojas.schemas.patient import PatientCreate, PatientOut, PatientUpdate
 from ojas.services.artifact_service import ArtifactService
 from ojas.services.patient_service import PatientService
 from ojas.storage.base import ObjectStorage, S3Storage
@@ -118,7 +118,33 @@ async def open_patient(
         created_at=patient.created_at,
         artifact_count=artifact_count,
     )
+@router.patch("/{patient_id}", response_model=PatientOut)
+async def update_patient(
+    patient_id: uuid.UUID,
+    body: PatientUpdate,
+    session: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> PatientOut:
+    svc = _patient_svc(session, user)
+    patient = await svc.update_patient(patient_id, name=body.name, phone_raw=body.phone)
+    return PatientOut(
+        id=patient.id,
+        clinic_id=patient.clinic_id,
+        name=patient.name,
+        phone_e164=patient.phone_e164,
+        last_accessed_at=patient.last_accessed_at,
+        created_at=patient.created_at,
+    )
 
+
+@router.delete("/{patient_id}", status_code=204)
+async def delete_patient(
+    patient_id: uuid.UUID,
+    session: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> None:
+    svc = _patient_svc(session, user)
+    await svc.delete_patient(patient_id)
 
 # ── Artifacts ─────────────────────────────────────────────────────────────────
 
@@ -249,15 +275,20 @@ async def _label_note_background(artifact_id: uuid.UUID, text: str) -> None:
     """AI-label a note artifact in the background."""
     try:
         from ojas.services.labeling_service import label_note
+        from ojas.services.llm_service import structure_transcript
         from ojas.db.session import async_session_factory
         from ojas.repositories.artifact_repository import ArtifactRepository
 
         title = await label_note(text)
+        note, tags = await structure_transcript(text)
+
         async with async_session_factory() as session:
             repo = ArtifactRepository(session)
             artifact = await repo.get(artifact_id)
             if artifact is not None:
                 artifact.title = title
+                artifact.structured_note = note
+                artifact.tags = tags
                 await session.commit()
                 if artifact.consultation_id:
                     from ojas.services.consolidation_service import consolidate_consultation

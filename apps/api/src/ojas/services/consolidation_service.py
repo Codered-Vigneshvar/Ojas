@@ -20,7 +20,13 @@ _client: AsyncOpenAI | None = None
 def _get_client() -> AsyncOpenAI:
     global _client
     if _client is None:
-        _client = AsyncOpenAI(api_key=settings.openai_api_key)
+        if settings.gemini_api_key:
+            _client = AsyncOpenAI(
+                api_key=settings.gemini_api_key,
+                base_url=settings.gemini_base_url,
+            )
+        else:
+            _client = AsyncOpenAI(api_key=settings.openai_api_key)
     return _client
 
 _CONSOLIDATION_SYSTEM = """\
@@ -152,19 +158,29 @@ async def consolidate_consultation(session: AsyncSession, consultation_id: uuid.
     client = _get_client()
     try:
         response = await client.chat.completions.create(
-            model=settings.openai_model,
+            model=settings.gemini_model_pro if settings.gemini_api_key else settings.openai_model,
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": _CONSOLIDATION_SYSTEM},
                 {"role": "user", "content": f"Manifest:\n{json.dumps(manifest, indent=2)}"}
             ],
             temperature=0.0,
-            max_tokens=1000,
+            max_tokens=4000,
         )
         
         result_json = response.choices[0].message.content
         if result_json:
-            parsed = json.loads(result_json)
+            # Strip markdown formatting if present
+            clean_json = result_json.strip()
+            if clean_json.startswith("```json"):
+                clean_json = clean_json[7:]
+            if clean_json.startswith("```"):
+                clean_json = clean_json[3:]
+            if clean_json.endswith("```"):
+                clean_json = clean_json[:-3]
+            clean_json = clean_json.strip()
+
+            parsed = json.loads(clean_json)
             consultation.summary_text = parsed.get("summary")
             consultation.suggested_questions = parsed.get("questions")
             consultation.clinical_manifest = manifest
@@ -205,7 +221,7 @@ async def ask_consultation(
     
     try:
         response = await client.chat.completions.create(
-            model=settings.openai_model, # Use the primary model for maximum intelligence on Q&A
+            model=settings.gemini_model_pro if settings.gemini_api_key else settings.openai_model, # Use the primary model for maximum intelligence on Q&A
             messages=messages,
             temperature=0.0,
         )

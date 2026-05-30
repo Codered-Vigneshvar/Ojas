@@ -50,6 +50,13 @@ class Settings(BaseSettings):
     deepgram_api_key: str = Field(default="")
     openai_model: str = Field(default="gpt-4o")
 
+    # Google Gemini settings
+    gemini_api_key: str = Field(default="")
+    gemini_base_url: str = Field(default="https://generativelanguage.googleapis.com/v1beta/openai/")
+    gemini_model_flash: str = Field(default="gemini-2.5-flash")
+    gemini_model_pro: str = Field(default="gemini-2.5-flash")
+
+
     @property
     def is_dev(self) -> bool:
         return self.environment == "dev"

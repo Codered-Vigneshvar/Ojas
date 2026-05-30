@@ -103,3 +103,20 @@ export interface Artifact {
 }
 
 export type TimeBucket = "Today" | "This week" | "This month" | "Earlier";
+
+export type AppointmentStatus = "scheduled" | "arrived" | "in_consultation" | "completed";
+
+export interface Appointment {
+  id: string;
+  clinic_id: string;
+  patient_id: string;
+  patient_name: string;
+  consultation_id: string | null;
+  scheduled_time: string;
+  actual_arrival_time: string | null;
+  duration_minutes: number;
+  status: AppointmentStatus;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}

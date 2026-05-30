@@ -11,6 +11,7 @@ import structlog
 from openai import AsyncOpenAI
 
 from ojas.config import settings
+from ojas.utils.json_helper import clean_json
 
 logger = structlog.get_logger(__name__)
 
@@ -20,7 +21,13 @@ _client: AsyncOpenAI | None = None
 def _get_client() -> AsyncOpenAI:
     global _client
     if _client is None:
-        _client = AsyncOpenAI(api_key=settings.openai_api_key)
+        if settings.gemini_api_key:
+            _client = AsyncOpenAI(
+                api_key=settings.gemini_api_key,
+                base_url=settings.gemini_base_url,
+            )
+        else:
+            _client = AsyncOpenAI(api_key=settings.openai_api_key)
     return _client
 
 
@@ -123,7 +130,7 @@ async def structure_transcript(raw_transcript: str) -> tuple[dict[str, object], 
     logger.info("llm_structure_transcript_start", chars=len(raw_transcript))
     client = _get_client()
     response = await client.chat.completions.create(
-        model=settings.openai_model,
+        model=settings.gemini_model_flash if settings.gemini_api_key else settings.openai_model,
         max_tokens=1024,
         response_format={"type": "json_object"},
         messages=[
@@ -131,7 +138,8 @@ async def structure_transcript(raw_transcript: str) -> tuple[dict[str, object], 
             {"role": "user", "content": f"Transcript:\n{raw_transcript}"},
         ],
     )
-    result: dict[str, object] = json.loads(response.choices[0].message.content or "{}")
+    raw = response.choices[0].message.content or "{}"
+    result: dict[str, object] = json.loads(clean_json(raw))
     tags: list[str] = result.pop("tags", [])  # type: ignore[assignment]
     logger.info("llm_structure_transcript_done", tags=tags)
     return result, tags
@@ -142,7 +150,7 @@ async def structure_prescription(ocr_text: str) -> dict[str, object]:
     logger.info("llm_structure_prescription_start", chars=len(ocr_text))
     client = _get_client()
     response = await client.chat.completions.create(
-        model=settings.openai_model,
+        model=settings.gemini_model_flash if settings.gemini_api_key else settings.openai_model,
         max_tokens=1024,
         response_format={"type": "json_object"},
         messages=[
@@ -150,7 +158,8 @@ async def structure_prescription(ocr_text: str) -> dict[str, object]:
             {"role": "user", "content": f"Prescription OCR text:\n{ocr_text}"},
         ],
     )
-    result: dict[str, object] = json.loads(response.choices[0].message.content or "{}")
+    raw = response.choices[0].message.content or "{}"
+    result: dict[str, object] = json.loads(clean_json(raw))
     logger.info("llm_structure_prescription_done")
     return result
 
@@ -171,7 +180,7 @@ async def apply_voice_correction(
         f"Doctor's correction:\n\"{correction_transcript}\""
     )
     response = await client.chat.completions.create(
-        model=settings.openai_model,
+        model=settings.gemini_model_flash if settings.gemini_api_key else settings.openai_model,
         max_tokens=1024,
         response_format={"type": "json_object"},
         messages=[
@@ -179,6 +188,7 @@ async def apply_voice_correction(
             {"role": "user", "content": user_content},
         ],
     )
-    result: dict[str, object] = json.loads(response.choices[0].message.content or "{}")
+    raw = response.choices[0].message.content or "{}"
+    result: dict[str, object] = json.loads(clean_json(raw))
     logger.info("llm_voice_correction_done")
     return result

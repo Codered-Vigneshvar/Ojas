@@ -146,3 +146,20 @@
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #d4d4d4; border-radius: 9999px; }
 ::-webkit-scrollbar-thumb:hover { background: #a3a3a3; }
+
+/* Override WebKit native date/time field selection highlight colors */
+::-webkit-datetime-edit-year-field:focus,
+::-webkit-datetime-edit-month-field:focus,
+::-webkit-datetime-edit-day-field:focus,
+::-webkit-datetime-edit-hour-field:focus,
+::-webkit-datetime-edit-minute-field:focus,
+::-webkit-datetime-edit-ampm-field:focus {
+  background-color: #0d9488 !important; /* teal-600 (matches Book button) */
+  color: white !important;
+}
+
+/* Global selection color to match */
+::selection {
+  background-color: #0d9488 !important;
+  color: white !important;
+}

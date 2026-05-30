@@ -1,14 +1,20 @@
 import { useState, useDeferredValue } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Search, Plus, Users, ChevronRight } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Search, Plus, Users, ChevronRight, ArrowLeft } from "lucide-react";
 import { listPatients } from "@/lib/api";
+import type { Patient } from "@/types";
 import PatientRow from "@/components/PatientRow";
 import CreatePatientModal from "@/components/CreatePatientModal";
+import EditPatientModal from "@/components/EditPatientModal";
+import DeletePatientModal from "@/components/DeletePatientModal";
 import { greeting } from "@/lib/time";
 
 export default function Home() {
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
+  const [editingPatient, setEditingPatient] = useState<Patient | null>(null);
+  const [deletingPatient, setDeletingPatient] = useState<Patient | null>(null);
   const deferredSearch = useDeferredValue(search);
 
   const { data: patients = [], isLoading } = useQuery({
@@ -23,6 +29,13 @@ export default function Home() {
       <header className="border-b border-neutral-200 bg-white/80 backdrop-blur-sm sticky top-0 z-10">
         <div className="max-w-3xl mx-auto px-6 h-14 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
+            <Link
+              to="/"
+              className="p-1.5 -ml-2 rounded-lg text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition-colors mr-1"
+              aria-label="Back to dashboard"
+            >
+              <ArrowLeft size={18} />
+            </Link>
             <span className="font-bold text-neutral-900 text-base tracking-tight">Ojas</span>
             <span className="px-2 py-0.5 rounded-md border border-neutral-200 text-[10px] font-mono text-neutral-500 uppercase tracking-wider">
               Clinic
@@ -141,7 +154,11 @@ export default function Home() {
             <div className="bg-white border border-neutral-100 rounded-2xl overflow-hidden shadow-sm divide-y divide-neutral-50 stagger-children">
               {patients.map((p) => (
                 <div key={p.id} className="animate-fade-in">
-                  <PatientRow patient={p} />
+                  <PatientRow 
+                    patient={p} 
+                    onEdit={setEditingPatient}
+                    onDelete={setDeletingPatient}
+                  />
                 </div>
               ))}
             </div>
@@ -150,6 +167,8 @@ export default function Home() {
       </main>
 
       {showCreate && <CreatePatientModal onClose={() => setShowCreate(false)} />}
+      {editingPatient && <EditPatientModal patient={editingPatient} onClose={() => setEditingPatient(null)} />}
+      {deletingPatient && <DeletePatientModal patient={deletingPatient} onClose={() => setDeletingPatient(null)} />}
     </div>
   );
 }

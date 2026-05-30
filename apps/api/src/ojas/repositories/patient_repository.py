@@ -67,3 +67,31 @@ class PatientRepository:
             select(func.count(Patient.id)).where(Patient.clinic_id == clinic_id)
         )
         return result.scalar_one()
+
+    async def update(self, patient_id: uuid.UUID, name: str | None = None, phone_e164: str | None = None) -> Patient | None:
+        patient = await self.get(patient_id)
+        if not patient:
+            return None
+            
+        if name is not None:
+            patient.name = name
+        if phone_e164 is not None:
+            patient.phone_e164 = phone_e164
+            
+        try:
+            await self._session.flush()
+            return patient
+        except IntegrityError as err:
+            await self._session.rollback()
+            raise ConflictError(
+                "A patient with this phone number already exists in this clinic"
+            ) from err
+
+    async def delete(self, patient_id: uuid.UUID) -> bool:
+        patient = await self.get(patient_id)
+        if not patient:
+            return False
+            
+        await self._session.delete(patient)
+        await self._session.flush()
+        return True

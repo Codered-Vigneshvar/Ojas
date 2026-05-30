@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Upload, Mic, StickyNote, Sparkles } from "lucide-react";
+import { ArrowLeft, Upload, Mic, StickyNote } from "lucide-react";
 import {
   getPatient,
   listArtifacts,
@@ -9,8 +9,15 @@ import {
   createNote,
   saveAudioArtifact,
   listConsultations,
-  createConsultation,
+  getConsultation,
+  createAppointment,
+  startConsultation,
   patchArtifact,
+  listAppointments,
+  patchAppointment,
+  patchConsultation,
+  deleteConsultation,
+  deleteAppointment,
 } from "@/lib/api";
 import NoteModal from "@/components/PatientWorkspace/NoteModal";
 import RecordModal from "@/components/PatientWorkspace/RecordModal";
@@ -19,13 +26,15 @@ import SnippetSidebar from "@/components/PatientWorkspace/SnippetSidebar";
 import SnippetDetail from "@/components/PatientWorkspace/SnippetDetail";
 import ConsultationHistory from "@/components/PatientWorkspace/ConsultationHistory";
 import ConsultationScribe from "@/components/PatientWorkspace/ConsultationScribe";
-import type { Consultation } from "@/types";
+import BookAppointmentModal from "@/components/Dashboard/BookAppointmentModal";
+import type { Consultation, Appointment } from "@/types";
 
 type Modal = "note" | "record" | "upload" | null;
 
 export default function PatientPage() {
   const { patientId } = useParams<{ patientId: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const qc = useQueryClient();
 
   const [activeModal, setActiveModal] = useState<Modal>(null);
@@ -33,6 +42,7 @@ export default function PatientPage() {
   const [activeSnippetId, setActiveSnippetId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeParentIdForModal, setActiveParentIdForModal] = useState<string | null>(null);
+  const [editingAppointment, setEditingAppointment] = useState<Appointment | null>(null);
 
   const { data: patient, isLoading: patientLoading } = useQuery({
     queryKey: ["patient", patientId],
@@ -61,6 +71,23 @@ export default function PatientPage() {
       return needsPolling ? 2000 : false;
     }
   });
+
+  const { data: allAppointments = [] } = useQuery({
+    queryKey: ["appointments", "all"],
+    queryFn: () => listAppointments(),
+  });
+
+  const patientAppointments = allAppointments.filter(a => a.patient_id === patientId);
+  const activeAppointment = patientAppointments.find(a => a.consultation_id === activeConsultation?.id);
+
+  const handleStartCheck = () => {
+    const globalActiveAppt = allAppointments.find(a => a.status === "in_consultation");
+    if (globalActiveAppt) {
+      alert(`You are currently seeing ${globalActiveAppt.patient_name || "another patient"}. If you want to consult another patient, please click on 'Finish Consultation' on that patient and come back here.`);
+      return false;
+    }
+    return true;
+  };
 
   const topLevelArtifacts = artifacts.filter(a => !a.parent_id);
   const activeSnippet = artifacts.find(a => a.id === activeSnippetId) || null;
@@ -97,6 +124,18 @@ export default function PatientPage() {
     }
   }, [activeSnippetId, activeSnippet, markSnippetRead]);
 
+  const initialConsultationId = location.state?.activeConsultationId;
+  useEffect(() => {
+    if (initialConsultationId && consultations.length > 0 && !activeConsultation) {
+      const match = consultations.find(c => c.id === initialConsultationId);
+      if (match) {
+        setActiveConsultation(match);
+        // Clear state so refreshing doesn't force re-open if user closed it
+        navigate(".", { replace: true, state: {} });
+      }
+    }
+  }, [initialConsultationId, consultations, activeConsultation, navigate]);
+
   const handleSelectSnippet = useCallback((id: string | null) => {
     setActiveSnippetId(id);
     if (id) {
@@ -110,9 +149,20 @@ export default function PatientPage() {
   }, [qc, patientId]);
 
   const consultationMutation = useMutation({
-    mutationFn: () => createConsultation(patientId!),
+    mutationFn: async () => {
+      const now = new Date();
+      const appt = await createAppointment({
+        patient_id: patientId!,
+        scheduled_time: now.toISOString(),
+        duration_minutes: 15,
+        notes: "Walk-in Consultation"
+      });
+      const { consultation_id } = await startConsultation(appt.id);
+      return await getConsultation(consultation_id);
+    },
     onSuccess: (newConsultation) => {
       invalidateData();
+      qc.invalidateQueries({ queryKey: ["appointments"] });
       setActiveConsultation(newConsultation);
     },
   });
@@ -195,16 +245,23 @@ export default function PatientPage() {
       {/* top bar */}
       <header className="flex-shrink-0 border-b border-neutral-200 bg-white/85 backdrop-blur-md z-10 shadow-xs">
         <div className="h-14 flex items-center px-4">
-          <Link
-            to="/"
+          <button
+            onClick={() => {
+              if (activeConsultation) {
+                setActiveConsultation(null);
+                setActiveSnippetId(null);
+              } else {
+                navigate("/patients");
+              }
+            }}
             className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition-colors mr-3"
-            aria-label="Back to home"
+            aria-label={activeConsultation ? "Back to consultations" : "Back to directory"}
           >
             <ArrowLeft size={18} />
-          </Link>
-          <div className="flex items-center gap-2">
+          </button>
+          <button onClick={() => navigate("/")} className="flex items-center gap-2 hover:opacity-80 transition-opacity">
             <span className="font-bold text-neutral-900 text-base tracking-tight">Ojas</span>
-          </div>
+          </button>
 
           {/* Active Patient & Consultation context */}
           <div className="mx-6 h-6 w-px bg-neutral-200" />
@@ -230,6 +287,47 @@ export default function PatientPage() {
           </div>
 
           <div className="flex-1" />
+          
+          {activeConsultation && activeAppointment && activeAppointment.status === "in_consultation" && (
+            <>
+              {artifacts.length === 0 && (
+                <button
+                  onClick={async () => {
+                    await patchAppointment(activeAppointment.id, { status: "scheduled", actual_arrival_time: null, consultation_id: null });
+                    qc.invalidateQueries({ queryKey: ["appointments"] });
+                    qc.invalidateQueries({ queryKey: ["consultations"] });
+                    setActiveConsultation(null);
+                  }}
+                  className="mr-2 px-4 py-1.5 bg-red-50 text-red-600 text-[13px] font-bold rounded-xl hover:bg-red-100 transition-colors shadow-sm active:scale-95"
+                >
+                  Reset Start
+                </button>
+              )}
+              <button
+                onClick={async () => {
+                  await patchAppointment(activeAppointment.id, { status: "completed" });
+                  qc.invalidateQueries({ queryKey: ["appointments"] });
+                }}
+                className="mr-4 px-4 py-1.5 bg-neutral-900 text-white text-[13px] font-bold rounded-xl hover:bg-neutral-800 transition-colors shadow-sm active:scale-95"
+              >
+                Finish Consultation
+              </button>
+            </>
+          )}
+
+          {activeConsultation && activeAppointment && activeAppointment.status === "completed" && (
+            <button
+              onClick={async () => {
+                if (!handleStartCheck()) return;
+                await patchAppointment(activeAppointment.id, { status: "in_consultation" });
+                qc.invalidateQueries({ queryKey: ["appointments"] });
+              }}
+              className="mr-4 px-4 py-1.5 bg-white border border-neutral-300 text-neutral-700 text-[13px] font-bold rounded-xl hover:bg-neutral-50 transition-colors shadow-sm active:scale-95"
+            >
+              Resume Consultation
+            </button>
+          )}
+
           <div className="w-8 h-8 rounded-full bg-neutral-900 flex items-center justify-center text-white text-xs font-semibold select-none">
             DR
           </div>
@@ -241,8 +339,44 @@ export default function PatientPage() {
         {!activeConsultation ? (
           <ConsultationHistory
             consultations={consultations}
+            appointments={patientAppointments}
             onSelect={setActiveConsultation}
-            onCreateNew={() => consultationMutation.mutate()}
+            onCreateNew={() => {
+              if (handleStartCheck()) consultationMutation.mutate();
+            }}
+            onStartScheduled={async (appt) => {
+              if (!handleStartCheck()) return;
+              const { consultation_id } = await startConsultation(appt.id);
+              const consultation = await getConsultation(consultation_id);
+              invalidateData();
+              qc.invalidateQueries({ queryKey: ["appointments"] });
+              setActiveConsultation(consultation);
+            }}
+            onUpdateStatus={async (apptId, status) => {
+              if (status === "in_consultation" && !handleStartCheck()) return;
+              await patchAppointment(apptId, { status });
+              qc.invalidateQueries({ queryKey: ["appointments"] });
+            }}
+            onResetStart={async (apptId) => {
+              await patchAppointment(apptId, { status: "scheduled", actual_arrival_time: null, consultation_id: null });
+              qc.invalidateQueries({ queryKey: ["appointments"] });
+              qc.invalidateQueries({ queryKey: ["consultations"] });
+              setActiveConsultation(null);
+            }}
+            onEditTitle={async (consultationId, title) => {
+              await patchConsultation(consultationId, { title });
+              qc.invalidateQueries({ queryKey: ["consultations"] });
+            }}
+            onDeleteConsultation={async (consultationId) => {
+              await deleteConsultation(consultationId);
+              qc.invalidateQueries({ queryKey: ["consultations"] });
+              qc.invalidateQueries({ queryKey: ["appointments"] });
+            }}
+            onEditAppointment={(appt) => setEditingAppointment(appt)}
+            onDeleteAppointment={async (appointmentId) => {
+              await deleteAppointment(appointmentId);
+              qc.invalidateQueries({ queryKey: ["appointments"] });
+            }}
             onClose={() => { }} // Could be used to go back to patient list in future
           />
         ) : (
@@ -348,6 +482,17 @@ export default function PatientPage() {
           isSaving={uploadMutation.isPending}
           onSave={async (file) => {
             await uploadMutation.mutateAsync(file);
+          }}
+        />
+      )}
+      {editingAppointment && (
+        <BookAppointmentModal
+          selectedDate={new Date(editingAppointment.scheduled_time)}
+          editAppointment={editingAppointment}
+          onClose={() => setEditingAppointment(null)}
+          onSuccess={() => {
+            setEditingAppointment(null);
+            qc.invalidateQueries({ queryKey: ["appointments"] });
           }}
         />
       )}

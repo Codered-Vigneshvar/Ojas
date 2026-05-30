@@ -209,11 +209,17 @@ async def delete_consultation(
         raise NotFoundError("Consultation not found")
 
     # Orphan artifacts (set consultation_id to NULL) rather than deleting them
-    from sqlalchemy import update
+    from sqlalchemy import update, delete
+    from ojas.models.appointment import Appointment
     await session.execute(
         update(Artifact)
         .where(Artifact.consultation_id == consultation_id)
         .values(consultation_id=None)
+    )
+
+    # Also delete the associated appointment block
+    await session.execute(
+        delete(Appointment).where(Appointment.consultation_id == consultation_id)
     )
 
     await session.delete(consultation)
