@@ -44,7 +44,7 @@ Thumbs.db
 # Alembic (keep migrations, ignore cache)
 __pycache__/
 
-# Models
+# AI model weights
 *.gguf
-models/
+/models/
 

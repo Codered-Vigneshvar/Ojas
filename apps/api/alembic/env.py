@@ -14,8 +14,6 @@ print("EXISTS:", os.path.exists(src_path))
 sys.path.insert(0, src_path)
 print("SYS.PATH:", sys.path)
 
-# Import all models so Alembic autogenerate can detect them
-import ojas.models  # noqa: F401
 from alembic import context
 from ojas.config import settings
 from ojas.db.base import Base
