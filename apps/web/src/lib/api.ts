@@ -1,5 +1,6 @@
 import axios, { AxiosError } from "axios";
 import type { Artifact, Patient, StructuredNote, PrescriptionSummary, Consultation, Appointment, AppointmentStatus, ChatMessage } from "@/types";
+import { supabase } from "@/lib/supabase";
 
 export interface ApiError {
   detail: string;
@@ -9,7 +10,15 @@ export interface ApiError {
 const api = axios.create({
   baseURL: "/api",
   headers: { "Content-Type": "application/json" },
-  withCredentials: true,
+});
+
+api.interceptors.request.use(async (config) => {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
 });
 
 api.interceptors.response.use(

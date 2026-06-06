@@ -9,8 +9,11 @@ import CreatePatientModal from "@/components/CreatePatientModal";
 import EditPatientModal from "@/components/EditPatientModal";
 import DeletePatientModal from "@/components/DeletePatientModal";
 import { greeting } from "@/lib/time";
+import { useAuth } from "@/lib/auth";
 
 export default function Home() {
+  const { user } = useAuth();
+  const doctorName = user?.user_metadata?.full_name ?? user?.user_metadata?.name ?? user?.email?.split("@")[0] ?? "Doctor";
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [editingPatient, setEditingPatient] = useState<Patient | null>(null);
@@ -58,7 +61,7 @@ export default function Home() {
         {/* greeting */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-neutral-900 tracking-tight">
-            {greeting()}, Dr Sreekanth.
+            {greeting()}, Dr {doctorName}.
           </h1>
           <p className="mt-1.5 text-sm text-neutral-500">
             Open a patient. Drop in anything. Ask the AI.

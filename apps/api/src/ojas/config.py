@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     s3_access_key: str = Field(default="minioadmin")
     s3_secret_key: str = Field(default="minioadmin")
     s3_bucket: str = Field(default="ojas-artifacts")
+    s3_region: str = Field(default="us-east-1")
 
     # STT
     stt_provider: str = Field(default="local")
@@ -40,10 +41,10 @@ class Settings(BaseSettings):
         default="Clinical consultation in English with occasional Tamil. Medical terminology, drug names, dosages, lab values."
     )
 
-    # Auth
-    jwt_secret: str = Field(default="change-me-in-production")
-    jwt_algorithm: str = "HS256"
-    jwt_expire_minutes: int = 60 * 24
+    # Supabase
+    supabase_url: str = Field(default="")
+    supabase_anon_key: str = Field(default="")
+    supabase_service_role_key: str = Field(default="")
 
     # AI services
     openai_api_key: str = Field(default="")

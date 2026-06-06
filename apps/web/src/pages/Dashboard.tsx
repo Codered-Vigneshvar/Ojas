@@ -5,6 +5,7 @@ import { Search, CalendarPlus, Mic, StickyNote, Activity } from "lucide-react";
 import { listAppointments, startConsultation, deleteAppointment, patchAppointment } from "@/lib/api";
 import { greeting } from "@/lib/time";
 import type { Appointment } from "@/types";
+import { useAuth } from "@/lib/auth";
 
 import DayPicker from "@/components/Dashboard/DayPicker";
 import AppointmentCard from "@/components/Dashboard/AppointmentCard";
@@ -12,6 +13,8 @@ import BookAppointmentModal from "@/components/Dashboard/BookAppointmentModal";
 import CalendarModal from "@/components/Dashboard/CalendarModal";
 
 export default function Dashboard() {
+  const { user } = useAuth();
+  const doctorName = user?.user_metadata?.full_name ?? user?.user_metadata?.name ?? user?.email?.split("@")[0] ?? "Doctor";
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -149,7 +152,7 @@ export default function Dashboard() {
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-6 mb-10">
           <div>
             <h1 className="text-3xl font-bold text-neutral-900 tracking-tight">
-              {greeting()}, Dr Sreekanth.
+              {greeting()}, Dr {doctorName}.
             </h1>
             <p className="mt-2 text-sm text-neutral-500 max-w-sm">
               Here is your schedule for the day. You can book new appointments or start consultations.
