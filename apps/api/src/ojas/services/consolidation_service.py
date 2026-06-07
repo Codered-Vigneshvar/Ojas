@@ -18,6 +18,7 @@ logger = structlog.get_logger(__name__)
 
 _CONSOLIDATION_SYSTEM = """\
 You are a clinical scribe AI. Given a consultation manifest with a patient name and timeline of snippets, produce a structured clinical overview.
+Each snippet's "content" object may have: transcript (verbatim audio), structured/prescription_structured (AI-extracted JSON), prescription_ocr_raw/text (raw OCR), and summary fields. Extract from ALL of them.
 
 RULES:
 - Be concise. Use short bullet points, never paragraphs.
@@ -70,9 +71,11 @@ Return EXACTLY this JSON:
 """
 
 _ASK_SYSTEM = """\
-You are a clinical assistant. Answer the doctor's question using ONLY the provided consultation manifest. 
+You are a clinical assistant. Answer the doctor's question using ONLY the provided consultation manifest.
+Each snippet may contain: transcript (verbatim audio), structured/prescription_structured (AI-extracted JSON), prescription_ocr_raw/text (raw OCR), and summary fields.
+- Search ALL content fields — transcript, structured, ocr_raw, text — before concluding information is absent.
 - Cite every fact using [Snippet Title](snippet://<id>).
-- If the answer is not in the manifest, say "This information is not available in the current consultation."
+- If the answer is genuinely not in any field of the manifest, say "This information is not available in the current consultation."
 - NEVER infer, diagnose, or add information not present in the manifest.
 """
 
@@ -98,32 +101,42 @@ async def consolidate_consultation(session: AsyncSession, consultation_id: uuid.
     )
     artifacts = artifacts_result.scalars().all()
 
-    # 3. Build manifest
+    # 3. Build manifest — include all available raw content so Q&A has complete context
     timeline = []
     for artifact in artifacts:
-        summary_str = "No summary available."
-        
+        content: dict[str, Any] = {}
+
+        # Full transcript — no truncation
+        if artifact.raw_transcript:
+            content["transcript"] = artifact.raw_transcript
+
+        # Structured AI extraction (structured note or prescription)
         if artifact.structured_note:
-            # Drop null values to save tokens
             note_data = {k: v for k, v in artifact.structured_note.items() if v}
             if note_data:
-                summary_str = json.dumps(note_data)
-        elif artifact.prescription_summary:
+                content["structured"] = note_data
+        if artifact.prescription_summary:
             presc_data = {k: v for k, v in artifact.prescription_summary.items() if v}
             if presc_data:
-                summary_str = json.dumps(presc_data)
-        elif artifact.type == "audio" and artifact.raw_transcript:
-            summary_str = artifact.raw_transcript[:4000] + "..." if len(artifact.raw_transcript) > 4000 else artifact.raw_transcript
-        elif artifact.text_content:
-            summary_str = artifact.text_content[:4000] + "..." if len(artifact.text_content) > 4000 else artifact.text_content
-        elif artifact.summary:
-            summary_str = artifact.summary
-        
+                content["prescription_structured"] = presc_data
+
+        # Raw OCR text alongside structured output so nothing is lost
+        if artifact.prescription_ocr_text:
+            content["prescription_ocr_raw"] = artifact.prescription_ocr_text
+        if artifact.text_content:
+            content["text"] = artifact.text_content
+
+        if artifact.summary:
+            content["summary"] = artifact.summary
+
+        if not content:
+            content["note"] = "No content available."
+
         timeline.append({
             "id": str(artifact.id),
             "type": artifact.type,
             "title": artifact.title,
-            "summary": summary_str,
+            "content": content,
         })
         
     manifest = {
