@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { X, User, Lock, Check, Send } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { patchMe, type MeOut } from "@/lib/api";
@@ -76,7 +77,7 @@ export default function ProfileModal({ profile, onClose }: Props) {
     setResetLoading(false);
   }
 
-  return (
+  return createPortal(
     <div
       ref={backdropRef}
       onClick={handleBackdropClick}
@@ -181,6 +182,7 @@ export default function ProfileModal({ profile, onClose }: Props) {
           </section>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
