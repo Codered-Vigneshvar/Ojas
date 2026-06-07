@@ -6,6 +6,7 @@ import { listAppointments, startConsultation, deleteAppointment, patchAppointmen
 import { greeting } from "@/lib/time";
 import type { Appointment } from "@/types";
 import { useAuth } from "@/lib/auth";
+import AvatarMenu from "@/components/AvatarMenu";
 
 import DayPicker from "@/components/Dashboard/DayPicker";
 import AppointmentCard from "@/components/Dashboard/AppointmentCard";
@@ -122,26 +123,24 @@ export default function Dashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-neutral-50 pb-20">
+    <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950 pb-20">
       {/* top bar */}
-      <header className="border-b border-neutral-200 bg-white/80 backdrop-blur-md sticky top-0 z-20 shadow-xs">
+      <header className="border-b border-neutral-200 dark:border-neutral-800 bg-white/80 dark:bg-neutral-900/80 backdrop-blur-md sticky top-0 z-20 shadow-xs">
         <div className="max-w-4xl mx-auto px-6 h-14 flex items-center justify-between">
           <button onClick={() => navigate("/")} className="flex items-center gap-2.5 hover:opacity-80 transition-opacity">
-            <span className="font-bold text-neutral-900 text-base tracking-tight">Ojas</span>
-            <span className="px-2 py-0.5 rounded-md border border-neutral-200 text-[10px] font-mono text-neutral-500 uppercase tracking-wider">
+            <span className="font-bold text-neutral-900 dark:text-neutral-100 text-base tracking-tight">Ojas</span>
+            <span className="px-2 py-0.5 rounded-md border border-neutral-200 dark:border-neutral-700 text-[10px] font-mono text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">
               Clinic
             </span>
           </button>
           <div className="flex items-center gap-4">
             <button
               onClick={() => navigate("/patients")}
-              className="text-sm font-medium text-neutral-500 hover:text-neutral-900 transition-colors"
+              className="text-sm font-medium text-neutral-500 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 transition-colors"
             >
               All Patients
             </button>
-            <div className="w-8 h-8 rounded-full bg-neutral-900 flex items-center justify-center text-white text-xs font-semibold select-none">
-              DR
-            </div>
+            <AvatarMenu />
           </div>
         </div>
       </header>
@@ -151,10 +150,10 @@ export default function Dashboard() {
         {/* Header Section */}
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-6 mb-10">
           <div>
-            <h1 className="text-3xl font-bold text-neutral-900 tracking-tight">
+            <h1 className="text-3xl font-bold text-neutral-900 dark:text-neutral-100 tracking-tight">
               {greeting()}, Dr {doctorName}.
             </h1>
-            <p className="mt-2 text-sm text-neutral-500 max-w-sm">
+            <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400 max-w-sm">
               Here is your schedule for the day. You can book new appointments or start consultations.
             </p>
           </div>

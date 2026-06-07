@@ -33,6 +33,26 @@ api.interceptors.response.use(
 
 export default api;
 
+// ── Profile ───────────────────────────────────────────────────────────────────
+
+export interface MeOut {
+  id: string;
+  name: string;
+  role: string;
+  clinic_id: string;
+  clinic_name: string;
+}
+
+export async function getMe(): Promise<MeOut> {
+  const { data } = await api.get<MeOut>("/users/me");
+  return data;
+}
+
+export async function patchMe(payload: { name?: string; clinic_name?: string }): Promise<MeOut> {
+  const { data } = await api.patch<MeOut>("/users/me", payload);
+  return data;
+}
+
 // ── Patients ──────────────────────────────────────────────────────────────────
 
 export async function createPatient(name: string, phone: string): Promise<Patient> {

@@ -6,6 +6,7 @@ interface AuthContextValue {
   session: Session | null;
   user: User | null;
   loading: boolean;
+  passwordRecovery: boolean;
   signOut: () => Promise<void>;
 }
 
@@ -14,6 +15,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [passwordRecovery, setPasswordRecovery] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -21,7 +23,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
     });
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, newSession) => {
+      if (event === "PASSWORD_RECOVERY") {
+        setPasswordRecovery(true);
+      } else {
+        setPasswordRecovery(false);
+      }
       setSession(newSession);
     });
 
@@ -33,7 +40,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ session, user: session?.user ?? null, loading, signOut }}>
+    <AuthContext.Provider value={{ session, user: session?.user ?? null, loading, passwordRecovery, signOut }}>
       {children}
     </AuthContext.Provider>
   );

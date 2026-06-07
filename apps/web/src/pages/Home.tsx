@@ -10,6 +10,7 @@ import EditPatientModal from "@/components/EditPatientModal";
 import DeletePatientModal from "@/components/DeletePatientModal";
 import { greeting } from "@/lib/time";
 import { useAuth } from "@/lib/auth";
+import AvatarMenu from "@/components/AvatarMenu";
 
 export default function Home() {
   const { user } = useAuth();
@@ -27,31 +28,29 @@ export default function Home() {
   });
 
   return (
-    <div className="min-h-screen bg-neutral-50">
+    <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950">
       {/* top bar */}
-      <header className="border-b border-neutral-200 bg-white/80 backdrop-blur-sm sticky top-0 z-10">
+      <header className="border-b border-neutral-200 dark:border-neutral-800 bg-white/80 dark:bg-neutral-900/80 backdrop-blur-sm sticky top-0 z-10">
         <div className="max-w-3xl mx-auto px-6 h-14 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <Link
               to="/"
-              className="p-1.5 -ml-2 rounded-lg text-neutral-400 hover:text-neutral-700 hover:bg-neutral-100 transition-colors mr-1"
+              className="p-1.5 -ml-2 rounded-lg text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors mr-1"
               aria-label="Back to dashboard"
             >
               <ArrowLeft size={18} />
             </Link>
-            <span className="font-bold text-neutral-900 text-base tracking-tight">Ojas</span>
-            <span className="px-2 py-0.5 rounded-md border border-neutral-200 text-[10px] font-mono text-neutral-500 uppercase tracking-wider">
+            <span className="font-bold text-neutral-900 dark:text-neutral-100 text-base tracking-tight">Ojas</span>
+            <span className="px-2 py-0.5 rounded-md border border-neutral-200 dark:border-neutral-700 text-[10px] font-mono text-neutral-500 dark:text-neutral-400 uppercase tracking-wider">
               Clinic
             </span>
           </div>
           <div className="flex items-center gap-3">
-            <button className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg border border-neutral-200 text-xs text-neutral-500 hover:bg-neutral-50 transition-colors font-mono">
+            <button className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg border border-neutral-200 dark:border-neutral-700 text-xs text-neutral-500 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800 transition-colors font-mono">
               <span className="text-[10px]">⌘K</span>
               <span>Quick search</span>
             </button>
-            <div className="w-8 h-8 rounded-full bg-neutral-900 flex items-center justify-center text-white text-xs font-semibold select-none">
-              DR
-            </div>
+            <AvatarMenu />
           </div>
         </div>
       </header>
@@ -60,10 +59,10 @@ export default function Home() {
       <main className="max-w-3xl mx-auto px-6 pt-12 pb-20 animate-fade-in">
         {/* greeting */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-neutral-900 tracking-tight">
+          <h1 className="text-3xl font-bold text-neutral-900 dark:text-neutral-100 tracking-tight">
             {greeting()}, Dr {doctorName}.
           </h1>
-          <p className="mt-1.5 text-sm text-neutral-500">
+          <p className="mt-1.5 text-sm text-neutral-500 dark:text-neutral-400">
             Open a patient. Drop in anything. Ask the AI.
           </p>
         </div>
