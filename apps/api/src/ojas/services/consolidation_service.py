@@ -153,9 +153,10 @@ async def consolidate_consultation(session: AsyncSession, consultation_id: uuid.
         "timeline": timeline,
     }
 
-    # If no artifacts, clear summary and return
+    # If no artifacts, clear everything and return
     if not timeline:
         consultation.summary_text = None
+        consultation.synopsis = None
         consultation.suggested_questions = None
         consultation.clinical_manifest = manifest
         await session.commit()
@@ -187,7 +188,9 @@ async def consolidate_consultation(session: AsyncSession, consultation_id: uuid.
 
             parsed = json.loads(clean_json)
             consultation.summary_text = parsed.get("summary")
-            consultation.synopsis = parsed.get("synopsis")
+            # Only set synopsis once — never overwrite an existing one automatically
+            if consultation.synopsis is None:
+                consultation.synopsis = parsed.get("synopsis")
             consultation.suggested_questions = parsed.get("questions")
             consultation.clinical_manifest = manifest
             
