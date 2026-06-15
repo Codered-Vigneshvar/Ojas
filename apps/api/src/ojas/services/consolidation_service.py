@@ -63,9 +63,16 @@ Provide 3 to 5 sample questions the doctor could click to instantly query this c
 - CRITICAL: You are FORBIDDEN from suggesting a question if the answer is not explicitly written in the snippets. Every question MUST be answerable using only the provided text.
 - Format them as a JSON array of strings in the `questions` field.
 
+Also write a `synopsis`: 1-2 plain text sentences (no markdown, no bullet points) that a doctor can read in 5 seconds to understand this consultation.
+- Sentence 1: why the patient came (presenting complaint or reason for visit).
+- Sentence 2: what the doctor did or recommended (diagnosis, prescription, tests ordered, plan).
+- If information for either sentence is missing, write only what is available.
+- Example: "Patient presented with chest pain and shortness of breath for 3 days. ECG ordered; nitrates prescribed and cardiology referral given."
+
 Return EXACTLY this JSON:
 {
   "summary": "markdown string",
+  "synopsis": "plain text 1-2 sentences",
   "questions": ["q1", "q2", "q3", "q4"]
 }
 """
@@ -180,6 +187,7 @@ async def consolidate_consultation(session: AsyncSession, consultation_id: uuid.
 
             parsed = json.loads(clean_json)
             consultation.summary_text = parsed.get("summary")
+            consultation.synopsis = parsed.get("synopsis")
             consultation.suggested_questions = parsed.get("questions")
             consultation.clinical_manifest = manifest
             

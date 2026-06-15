@@ -68,6 +68,7 @@ export interface Consultation {
   updated_at: string;
   artifact_count: number;
   summary_text: string | null;
+  synopsis: string | null;
   suggested_questions: string[] | null;
 }
 

@@ -17,6 +17,7 @@ class ConsultationOut(BaseModel):
     updated_at: datetime
     artifact_count: int = 0
     summary_text: str | None = None
+    synopsis: str | None = None
     suggested_questions: list[str] | None = None
 
     model_config = {"from_attributes": True}

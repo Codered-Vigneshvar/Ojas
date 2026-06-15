@@ -20,6 +20,7 @@ class Consultation(BaseModel):
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     summary_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    synopsis: Mapped[str | None] = mapped_column(Text, nullable=True)
     suggested_questions: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
     clinical_manifest: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
