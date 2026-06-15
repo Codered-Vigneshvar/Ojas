@@ -113,6 +113,7 @@ async def list_consultations(
             updated_at=row.Consultation.updated_at,
             artifact_count=row.artifact_count,
             summary_text=row.Consultation.summary_text,
+            synopsis=row.Consultation.synopsis,
             suggested_questions=row.Consultation.suggested_questions,
         )
         for row in result
